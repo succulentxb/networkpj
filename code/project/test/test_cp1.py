@@ -9,7 +9,7 @@ from fabric import Connection
 import time
 import socket
 
-CODE_DIR = '/vagrant/15-441-project-2'
+CODE_DIR = '/vagrant/project'
 PCAP = 'test/test.pcap'
 IFNAME = 'enp0s8'
 

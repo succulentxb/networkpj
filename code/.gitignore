@@ -1,2 +1,6 @@
 ubuntu-xenial-16.04-cloudimg-console.log
 .vagrant/
+__pycache__/
+testing_server
+pytest_server.lock
+.vscode/
