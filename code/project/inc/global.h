@@ -1,4 +1,7 @@
+#include <time.h>
 #include "grading.h"
+
+
 #ifndef _GLOBAL_H_
 #define _GLOBAL_H_
 
@@ -17,11 +20,12 @@
 #define TRUE 1
 #define FALSE 0
 
-
 typedef struct {
-	uint32_t last_seq_received;
+	uint32_t next_seq_to_received;
 	uint32_t last_ack_received;
 	pthread_mutex_t ack_lock;
+	uint32_t last_send_base;
+
 } window_t;
 
 
@@ -35,6 +39,7 @@ typedef struct {
 	int received_len;
 	pthread_mutex_t recv_lock;
 	pthread_cond_t wait_cond;
+	pthread_cond_t close_wait_cond;
 	char* sending_buf;
 	int sending_len;
 	int type;
@@ -42,6 +47,28 @@ typedef struct {
 	int dying;
 	pthread_mutex_t death_lock;
 	window_t window;
+	uint32_t rwnd;
+    uint32_t cwnd;
+	char * temp_data;
+	uint32_t temp_data_size;
+	struct timeval send_time;
+	struct timeval recv_time;
+	int edit_time_flag;
+	int their_fin;
+	int their_syn;
+	int my_fin;
+	uint32_t estimatedRTT;
+    uint32_t sampleRTT;
+    uint32_t DevRTT;
+    struct timeval timeout_interval;
+
+    int duplicated_ACK;
+    int status;
+    uint32_t ssthresh;
+
+    uint32_t wmax;
+
+
 } cmu_socket_t;
 
 #endif
