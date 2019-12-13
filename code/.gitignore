@@ -4,3 +4,4 @@ __pycache__/
 testing_server
 pytest_server.lock
 .vscode/
+*.swp
