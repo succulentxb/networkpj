@@ -45,6 +45,20 @@ int cmu_socket(cmu_socket_t* dst, int flag, int port, char* serverIP) {
   dst->edit_time_flag = FALSE;
   pthread_mutex_init(&(dst->window.ack_lock), NULL);
 
+  dst->cwnd = WINDOW_INITIAL_WINDOW_SIZE * MSS;
+  dst->rwnd = WINDOW_INITIAL_WINDOW_SIZE * MSS;
+  dst->ssthresh = WINDOW_INITIAL_SSTHRESH * MSS;
+  dst->esti_rtt = WINDOW_INITIAL_RTT * 1000;
+  dst->dev_rtt = 0;
+
+  dst->timeout_interval.tv_sec = 3;
+  dst->timeout_interval.tv_usec = 0;
+
+  dst->their_fin = FALSE;
+  dst->their_syn = FALSE;
+  dst->temp_data = NULL;
+  dst->temp_data_size = 0;
+
   if(pthread_cond_init(&dst->wait_cond, NULL) != 0){
     perror("[ERROR] condition variable not set");
     return EXIT_ERROR;
@@ -53,7 +67,7 @@ int cmu_socket(cmu_socket_t* dst, int flag, int port, char* serverIP) {
   switch(flag){
     case(TCP_INITATOR):
       if(serverIP == NULL){
-        perror("ERROR serverIP NULL");
+        perror("[ERROR] serverIP NULL");
         return EXIT_ERROR;
       }
       memset(&conn, 0, sizeof(conn));          
@@ -65,14 +79,12 @@ int cmu_socket(cmu_socket_t* dst, int flag, int port, char* serverIP) {
       my_addr.sin_family = AF_INET;
       my_addr.sin_addr.s_addr = htonl(INADDR_ANY);
       my_addr.sin_port = 0;
-      if (bind(sockfd, (struct sockaddr *) &my_addr, 
-        sizeof(my_addr)) < 0){
-        perror("ERROR on binding");
+      if (bind(sockfd, (struct sockaddr *) &my_addr, sizeof(my_addr)) < 0) {
+        perror("[ERROR] on binding");
         return EXIT_ERROR;
       }
-
       break;
-    //服务器端  
+
     case(TCP_LISTENER):
       bzero((char *) &conn, sizeof(conn));
       conn.sin_family = AF_INET;
@@ -80,59 +92,45 @@ int cmu_socket(cmu_socket_t* dst, int flag, int port, char* serverIP) {
       conn.sin_port = htons((unsigned short)port);
 
       optval = 1;
-      setsockopt(sockfd, SOL_SOCKET, SO_REUSEADDR, 
-           (const void *)&optval , sizeof(int));
-      if (bind(sockfd, (struct sockaddr *) &conn, 
-        sizeof(conn)) < 0){
-          perror("ERROR on binding");
+      setsockopt(sockfd, SOL_SOCKET, SO_REUSEADDR, (const void *)&optval , sizeof(int));
+      if (bind(sockfd, (struct sockaddr *) &conn, sizeof(conn)) < 0) {
+          perror("[ERROR] on binding");
           return EXIT_ERROR;
       }
       dst->conn = conn;
       break;
 
     default:
-      perror("Unknown Flag");
+      perror("[ERROR] Unknown Flag");
       return EXIT_ERROR;
   }
-  getsockname(sockfd, (struct sockaddr *) &my_addr, &len);
+
+  getsockname(sockfd, (struct sockaddr*) &my_addr, &len);
   dst->my_port = ntohs(my_addr.sin_port);
-
-  dst->cwnd = WINDOW_INITIAL_WINDOW_SIZE * MSS;
-  dst->rwnd = WINDOW_INITIAL_WINDOW_SIZE * MSS;
-  dst->ssthresh = WINDOW_INITIAL_SSTHRESH * MSS;
-  dst->estimatedRTT = WINDOW_INITIAL_RTT * 1000;
-  dst->DevRTT = 0;
-
-  dst->timeout_interval.tv_sec = 3;
-  dst->timeout_interval.tv_usec = 0;
-
-  dst->their_fin = FALSE;
-  dst->their_syn = FALSE;
-  dst->temp_data = NULL;
-  dst->temp_data_size = 0;
-  if (flag == TCP_INITATOR &&  client_handshake(dst) < 0 ){
+  
+  if (flag == TCP_INITATOR &&  client_handshake(dst) < 0 ) {
+    perror("[ERROR] handshake failed");
     return EXIT_ERROR;
   }
   if (flag == TCP_LISTENER &&  server_handshake(dst) < 0 ){
+    perror("[ERROR] handshake failed");
     return EXIT_ERROR;
   }
 
   dst->window.next_seq_to_received = 1;
   dst->window.last_ack_received = 1;
   dst->temp_data_size = 0;
-  //创建线程，开始交互
+
   pthread_create(&(dst->thread_id), NULL, begin_backend, (void *)dst);  
   return EXIT_SUCCESS;
 }
 
-int client_handshake(cmu_socket_t * sock){
-
-  reliable_flags_packet_send(sock,0,0,SYN_FLAG_MASK);
+int client_handshake(cmu_socket_t * sock) {
+  reliable_flags_packet_send(sock, 0, 0, SYN_FLAG_MASK);
   return 0;
 }
 
-int server_handshake(cmu_socket_t * sock){
-  
+int server_handshake(cmu_socket_t * sock) {
   while(sock->their_syn == FALSE){
     check_for_data(sock,TIMEOUT);
   }

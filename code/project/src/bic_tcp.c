@@ -122,11 +122,11 @@ void edit_timer(cmu_socket_t *sock){
     if (!sock->edit_time_flag)
       return;
 
-    sock->sampleRTT = (sock->recv_time.tv_sec - sock->send_time.tv_sec)*1000000 + (sock->recv_time.tv_usec - sock->send_time.tv_usec); 
-    sock->estimatedRTT = 0.875*sock->estimatedRTT + 0.125*sock->sampleRTT;
-    sock->DevRTT = 0.75*sock->DevRTT + 0.25*abs(sock->sampleRTT - sock->estimatedRTT);
-    sock->timeout_interval.tv_sec = (sock->estimatedRTT + 4 * sock->DevRTT)/1000000;
-    sock->timeout_interval.tv_usec = (sock->estimatedRTT + 4 * sock->DevRTT)%1000000;
+    sock->samp_rtt = (sock->recv_time.tv_sec - sock->send_time.tv_sec)*1000000 + (sock->recv_time.tv_usec - sock->send_time.tv_usec); 
+    sock->esti_rtt = 0.875*sock->esti_rtt + 0.125*sock->samp_rtt;
+    sock->dev_rtt = 0.75*sock->dev_rtt + 0.25*abs(sock->samp_rtt - sock->esti_rtt);
+    sock->timeout_interval.tv_sec = (sock->esti_rtt + 4 * sock->dev_rtt)/1000000;
+    sock->timeout_interval.tv_usec = (sock->esti_rtt + 4 * sock->dev_rtt)%1000000;
 }
 int is_timeout(cmu_socket_t *sock,struct timeval * time1,struct timeval *time2){
   uint32_t t1 = (time2->tv_sec - time1->tv_sec)*1000000 + (time2->tv_usec - time1->tv_usec);

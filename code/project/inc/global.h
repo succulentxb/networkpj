@@ -57,9 +57,9 @@ typedef struct {
 	int their_fin;
 	int their_syn;
 	int my_fin;
-	uint32_t estimatedRTT;
-    uint32_t sampleRTT;
-    uint32_t DevRTT;
+	uint32_t esti_rtt;
+    uint32_t samp_rtt;
+    uint32_t dev_rtt;
     struct timeval timeout_interval;
 
     int duplicated_ACK;
