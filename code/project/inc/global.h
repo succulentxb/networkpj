@@ -17,6 +17,10 @@
 #define TRUE 1
 #define FALSE 0
 
+#define ERRTIMEOUT 1
+#define ERROVERFLOW 2
+#define ERRWRONGPKT 3
+#define ERRACKERR 4
 
 typedef struct {
 	uint32_t last_seq_received;

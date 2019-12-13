@@ -1,5 +1,8 @@
 #include "cmu_tcp.h"
 
+int client_connect_handshakes(cmu_socket_t* dst);
+int server_connect_handshakes(cmu_socket_t* dst);
+
 /*
  * Param: dst - The structure where socket information will be stored
  * Param: flag - A flag indicating the type of socket(Listener / Initiator)
@@ -65,7 +68,7 @@ int cmu_socket(cmu_socket_t * dst, int flag, int port, char * serverIP){
         perror("ERROR on binding");
         return EXIT_ERROR;
       }
-
+      
       break;
     
     case(TCP_LISTENER):
@@ -83,6 +86,9 @@ int cmu_socket(cmu_socket_t * dst, int flag, int port, char * serverIP){
           return EXIT_ERROR;
       }
       dst->conn = conn;
+      getsockname(sockfd, (struct sockaddr *) &my_addr, &len);
+      dst->my_port = ntohs(my_addr.sin_port);
+      printf("[DEBUG] server socket bind ok\n");
       break;
 
     default:
@@ -91,9 +97,113 @@ int cmu_socket(cmu_socket_t * dst, int flag, int port, char * serverIP){
   }
   getsockname(sockfd, (struct sockaddr *) &my_addr, &len);
   dst->my_port = ntohs(my_addr.sin_port);
+  
+  if (flag == TCP_INITATOR && client_connect_handshakes(dst) != 0) {
+    return EXIT_FAILURE;
+  }
+  if (flag == TCP_LISTENER && server_connect_handshakes(dst) != 0) {
+    return EXIT_FAILURE;
+  }
+
+  printf("[DEBUG] socket init done, start backend thread\n");
 
   pthread_create(&(dst->thread_id), NULL, begin_backend, (void *)dst);  
   return EXIT_SUCCESS;
+}
+
+/*
+ * Param: dst - The socket to connect tcp client connection
+ * 
+ * Purpose: To complete first and second handshake in tcp connect handshakes for client.
+ *  Send a SYN to server and recieve SYN from server.
+ * 
+ * Return: The half connected socket which has completed first two handshakes.
+ *  The value returned will provide error information. 
+ *  Return 0 if success.
+ * 
+ */ 
+int client_connect_handshakes(cmu_socket_t* dst) {
+  int seq;
+  char* msg;
+  socklen_t conn_len = sizeof(dst->conn);
+
+  int rlen;
+  char hdr[DEFAULT_HEADER_LEN];
+  
+  seq = dst->window.last_ack_received;
+  msg = create_packet_buf(dst->my_port, dst->their_port, seq, 0, DEFAULT_HEADER_LEN, 
+      DEFAULT_HEADER_LEN, SYN_FLAG_MASK, 1, 0, NULL, NULL, 0);
+  printf("[DEBUG] client start handshake: src=%d, dst=%d, seq=%d\n", dst->my_port, dst->their_port, seq);
+  sendto(dst->socket, msg, DEFAULT_HEADER_LEN, 0, 
+      (struct sockaddr*) &(dst->conn), conn_len);
+
+  rlen = recvfrom(dst->socket, hdr, DEFAULT_HEADER_LEN, MSG_PEEK, (struct sockaddr*) &(dst->conn), &conn_len);
+  printf("[DEBUG] recieve SYN response from server, len=%d, ack=%d\n", rlen, get_ack(hdr));
+  if (rlen > DEFAULT_HEADER_LEN) {
+    perror("ERROR handshake read buffer overflow");
+    return ERROVERFLOW;
+  }
+  
+  // Packet check.
+  // TODO: packet src address check, otherwise exists a security flaw.
+  if (get_flags(hdr) != SYN_FLAG_MASK || get_plen(hdr) != DEFAULT_HEADER_LEN) {
+    perror("ERROR wrong packet");
+    return ERRWRONGPKT;
+  }
+  if (get_ack(hdr) != seq+1) {
+    perror("ERROR ack number wrong");
+    return ERRACKERR;
+  }
+  
+  dst->window.last_ack_received = seq+1;
+  dst->window.last_seq_received = get_seq(hdr)+1;
+  return 0;
+}
+
+/*
+ * Param: dst - The socket waiting for connection from client.
+ * 
+ * Purpose: To complete handshake in tcp connection for server.
+ *  Recieve SYN from client and send a SYN to client.
+ * 
+ * Return: The socket for server which has completed server handshake.
+ *  The value returned will provide error information.
+ *  Return 0 if success.
+ * 
+ */
+int server_connect_handshakes(cmu_socket_t* dst) {
+  int seq;
+  int rlen;
+  char* msg;
+  char hdr[DEFAULT_HEADER_LEN];
+  socklen_t conn_len = sizeof(dst->conn);
+
+  printf("[DEBUG] server start listening for handshake\n");
+  rlen = recvfrom(dst->socket, hdr, DEFAULT_HEADER_LEN, MSG_PEEK, 
+      (struct sockaddr*) &(dst->conn), &conn_len);
+  printf("[DEBUG] server recieve packet, len=%d\n", rlen);
+  if (rlen > DEFAULT_HEADER_LEN) {
+    perror("ERROR handshake read buffer overflow");
+    return ERROVERFLOW;
+  }
+
+  // Packet check.
+  if (get_flags(hdr) != SYN_FLAG_MASK || get_plen(hdr) != DEFAULT_HEADER_LEN) {
+    perror("ERROR wrong packet");
+    return ERRWRONGPKT;
+  }
+  
+  dst->window.last_seq_received = get_seq(hdr);
+  seq = dst->window.last_ack_received;
+  msg = create_packet_buf(dst->my_port, get_src(hdr), seq, 
+      dst->window.last_seq_received+1, DEFAULT_HEADER_LEN, 
+      DEFAULT_HEADER_LEN, SYN_FLAG_MASK, 1, 0, NULL, NULL, 0);
+  printf("[DEBUG] server response SYN, src=%d, dst=%d, seq=%d, ack=%d\n", 
+      dst->my_port, get_src(hdr), seq, dst->window.last_seq_received+1);
+  sendto(dst->socket, msg, DEFAULT_HEADER_LEN, 0, 
+      (struct sockaddr*) &(dst->conn), conn_len);
+  
+  return 0;
 }
 
 /*

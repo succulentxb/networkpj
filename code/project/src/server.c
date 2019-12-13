@@ -55,6 +55,7 @@ int main(int argc, char **argv) {
     portno = (unsigned short)atoi(serverport);
 
 
+    printf("[DEBUG] tcp listener initing...\n");
     if(cmu_socket(&socket, TCP_LISTENER, portno, serverip) < 0)
         exit(EXIT_FAILURE);
 

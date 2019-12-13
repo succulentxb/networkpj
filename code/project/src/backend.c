@@ -175,6 +175,19 @@ void* begin_backend(void * in){
   int death, buf_len, send_signal;
   char* data;
 
+  // switch (dst->type) {
+  // case TCP_INITATOR:
+  //   client_backend(dst);
+  //   break;
+  
+  // case TCP_LISTENER:
+  //   break;
+
+  // default:
+  //   perror("ERROR unknown tcp type");
+  //   return EXIT_ERROR;
+  // }
+
   while(TRUE){
     while(pthread_mutex_lock(&(dst->death_lock)) !=  0);
     death = dst->dying;
@@ -218,3 +231,50 @@ void* begin_backend(void * in){
   pthread_exit(NULL); 
   return NULL; 
 }
+
+// void* client_backend(cmu_socket_t* sock) {
+//   int death;
+//   int buf_len;
+//   int send_signal;
+//   char *data;
+
+//   while (TRUE) {
+//     while (pthread_mutex_lock(&(sock->death_lock)) != 0);
+//     death = sock->dying;
+//     pthread_mutex_unlock(&(sock->death_lock));
+
+//     while (pthread_mutex_lock(&(sock->send_lock)) != 0);
+//     buf_len = sock->sending_len;
+//     if (death && buf_len == 0)
+//      break;
+
+//     if (buf_len > 0) {
+//       data = malloc(buf_len);
+//       memcpy(data, sock->sending_buf, buf_len);
+//       sock->sending_len = 0;
+//       free(sock->sending_buf);
+//       sock->sending_buf = NULL;
+//       pthread_mutex_unlock(&(sock->send_lock));
+//       single_send(sock, data, buf_len);
+//       free(data);
+//     } else 
+//       pthread_mutex_unlock(&(sock->send_lock));
+
+//     check_for_data(sock, NO_WAIT);
+
+//     while (pthread_mutex_lock(&(sock->recv_lock)) != 0);
+//     send_signal = sock->received_len > 0;
+//     pthread_mutex_unlock(&(sock->recv_lock));
+    
+//     if (send_signal) {
+//       pthread_cond_signal(&(sock->wait_cond));
+//     }
+//   }
+  
+//   pthread_exit(NULL);
+//   return NULL;
+// }
+
+// void* server_backend(cmu_socket_t* sock) {
+
+// }
