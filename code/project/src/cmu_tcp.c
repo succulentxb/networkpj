@@ -1,5 +1,8 @@
 #include "cmu_tcp.h"
 
+int client_handshake(cmu_socket_t * sock);
+int server_handshake(cmu_socket_t * sock);
+
 /*
  * Param: dst - The structure where socket information will be stored
  * Param: flag - A flag indicating the type of socket(Listener / Initiator)
@@ -14,34 +17,18 @@
  *
  */
 
-int client_shake_hand(cmu_socket_t * sock){
-
-  reliable_flags_packet_send(sock,0,0,SYN_FLAG_MASK);
-  return 0;
-}
-
-int server_shake_hand(cmu_socket_t * sock){
-  
-  while(sock->their_syn == FALSE){
-    check_for_data(sock,TIMEOUT);
-  }
-  puts("server send syn");
-  reliable_flags_packet_send(sock,0,1,SYN_FLAG_MASK | ACK_FLAG_MASK);
-}
-
-int cmu_socket(cmu_socket_t * dst, int flag, int port, char * serverIP){
+int cmu_socket(cmu_socket_t* dst, int flag, int port, char* serverIP) {
   int sockfd, optval;
   socklen_t len;
   struct sockaddr_in conn, my_addr;
   len = sizeof(my_addr);
 
-  //创建UDP 的 socket
   sockfd = socket(AF_INET, SOCK_DGRAM, 0);
   if (sockfd < 0){
-    perror("ERROR opening socket");
+    perror("[ERROR] opening socket");
     return EXIT_ERROR;
   }
-  //初始化TCP socket 结构体
+
   dst->their_port = port;
   dst->socket = sockfd;
   dst->received_buf = NULL;
@@ -59,13 +46,11 @@ int cmu_socket(cmu_socket_t * dst, int flag, int port, char * serverIP){
   pthread_mutex_init(&(dst->window.ack_lock), NULL);
 
   if(pthread_cond_init(&dst->wait_cond, NULL) != 0){
-    perror("ERROR condition variable not set\n");
+    perror("[ERROR] condition variable not set");
     return EXIT_ERROR;
   }
 
-
   switch(flag){
-    // 客户端
     case(TCP_INITATOR):
       if(serverIP == NULL){
         perror("ERROR serverIP NULL");
@@ -125,10 +110,10 @@ int cmu_socket(cmu_socket_t * dst, int flag, int port, char * serverIP){
   dst->their_syn = FALSE;
   dst->temp_data = NULL;
   dst->temp_data_size = 0;
-  if (flag == TCP_INITATOR &&  client_shake_hand(dst) < 0 ){
+  if (flag == TCP_INITATOR &&  client_handshake(dst) < 0 ){
     return EXIT_ERROR;
   }
-  if (flag == TCP_LISTENER &&  server_shake_hand(dst) < 0 ){
+  if (flag == TCP_LISTENER &&  server_handshake(dst) < 0 ){
     return EXIT_ERROR;
   }
 
@@ -139,6 +124,22 @@ int cmu_socket(cmu_socket_t * dst, int flag, int port, char * serverIP){
   pthread_create(&(dst->thread_id), NULL, begin_backend, (void *)dst);  
   return EXIT_SUCCESS;
 }
+
+int client_handshake(cmu_socket_t * sock){
+
+  reliable_flags_packet_send(sock,0,0,SYN_FLAG_MASK);
+  return 0;
+}
+
+int server_handshake(cmu_socket_t * sock){
+  
+  while(sock->their_syn == FALSE){
+    check_for_data(sock,TIMEOUT);
+  }
+  puts("server send syn");
+  reliable_flags_packet_send(sock,0,1,SYN_FLAG_MASK | ACK_FLAG_MASK);
+}
+
 int wave_hand(cmu_socket_t * sock){
   while(pthread_mutex_lock(&(sock->send_lock)) != 0);
   //等待把缓冲区的数据全部发完
