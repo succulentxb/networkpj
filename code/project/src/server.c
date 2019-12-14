@@ -108,7 +108,6 @@ int main(int argc, char **argv) {
     functionality(&socket); 
     if(cmu_close(&socket) < 0)
         exit(EXIT_FAILURE);
-    puts("server close now");
-    // printf("time = %d \n",time2.tv_sec-time1.tv_sec + (time2.tv_usec-time1.tv_usec)/1000000);
+
     return EXIT_SUCCESS;
 }

@@ -60,6 +60,10 @@ int cmu_socket(cmu_socket_t* dst, int flag, int port, char* serverIP) {
   dst->tmp_buf = NULL;
   dst->tmp_len = 0;
 
+  dst->window.expected_rev_seq = 0;
+  dst->window.last_ack_received = 0;
+  dst->tmp_len = 0;
+
   if(pthread_cond_init(&dst->wait_cond, NULL) != 0) {
     perror("[ERROR] condition variable not set");
     return EXIT_ERROR;
@@ -117,10 +121,6 @@ int cmu_socket(cmu_socket_t* dst, int flag, int port, char* serverIP) {
     perror("[ERROR] handshake failed");
     return EXIT_ERROR;
   }
-
-  dst->window.expected_rev_seq = 1;
-  dst->window.last_ack_received = 1;
-  dst->tmp_len = 0;
 
   pthread_create(&(dst->thread_id), NULL, begin_backend, (void *)dst);  
   return EXIT_SUCCESS;

@@ -355,7 +355,7 @@ int check_for_data_inner(cmu_socket_t* sock, int flags) {
     case NO_WAIT:
       len = recvfrom(sock->socket, hdr, DEFAULT_HEADER_LEN, MSG_DONTWAIT | MSG_PEEK, 
           (struct sockaddr*) &(sock->conn), &conn_len);
-      printf("[DEBUG] [check_for_data_inner] recieve data case NO_WAIT, len=%d\n", (int)len);
+      // printf("[DEBUG] [check_for_data_inner] recieve data case NO_WAIT, len=%d\n", (int)len);
       break;
 
     default:
@@ -591,12 +591,12 @@ void* begin_backend(void * in) {
     while(pthread_mutex_lock(&(dst->death_lock)) !=  0);
     death = dst->dying;
     pthread_mutex_unlock(&(dst->death_lock));
-    printf("[DEBUG] [begin_backend] check death=%d\n", death);
+    // printf("[DEBUG] [begin_backend] check death=%d\n", death);
 
     while(pthread_mutex_lock(&(dst->send_lock)) != 0);
     buf_len = dst->sending_len;
     pthread_mutex_unlock(&(dst->send_lock));
-    printf("[DEBUG] [begin_backend] check buf_len=%d\n", buf_len);
+    // printf("[DEBUG] [begin_backend] check buf_len=%d\n", buf_len);
 
     if(death && buf_len == 0 && dst->their_fin  && dst->my_fin) {
       // no data to send, socket wating for release
