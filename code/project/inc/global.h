@@ -43,6 +43,8 @@ typedef struct {
 	pthread_cond_t wait_cond;
 	pthread_cond_t close_wait_cond;
 
+	char* temp_data;
+	uint32_t temp_data_size;
 	char* sending_buf;
 	int sending_len;
 	int type;
@@ -56,12 +58,10 @@ typedef struct {
 	uint32_t rwnd;
     uint32_t cwnd;
 
-	char* temp_data;
-	uint32_t temp_data_size;
-
 	struct timeval send_time;
 	struct timeval recv_time;
 	int edit_time_flag;
+	pthread_mutex_t time_lock;
 
 	int their_fin;
 	int their_syn;

@@ -2,6 +2,7 @@
 
 int client_handshake(cmu_socket_t * sock);
 int server_handshake(cmu_socket_t * sock);
+int wave_hand(cmu_socket_t * sock);
 
 /*
  * Param: dst - The structure where socket information will be stored
@@ -23,7 +24,7 @@ int cmu_socket(cmu_socket_t* dst, int flag, int port, char* serverIP) {
   len = sizeof(my_addr);
 
   sockfd = socket(AF_INET, SOCK_DGRAM, 0);
-  if (sockfd < 0){
+  if (sockfd < 0) {
     perror("[ERROR] opening socket");
     return EXIT_ERROR;
   }
@@ -42,6 +43,7 @@ int cmu_socket(cmu_socket_t* dst, int flag, int port, char* serverIP) {
   dst->window.last_ack_received = 0;
   dst->window.expected_rev_seq = 0;
   dst->edit_time_flag = FALSE;
+  pthread_mutex_init(&(dst->time_lock), NULL);
   pthread_mutex_init(&(dst->window.ack_lock), NULL);
 
   dst->cwnd = WINDOW_INITIAL_WINDOW_SIZE * MSS;
@@ -58,14 +60,14 @@ int cmu_socket(cmu_socket_t* dst, int flag, int port, char* serverIP) {
   dst->temp_data = NULL;
   dst->temp_data_size = 0;
 
-  if(pthread_cond_init(&dst->wait_cond, NULL) != 0){
+  if(pthread_cond_init(&dst->wait_cond, NULL) != 0) {
     perror("[ERROR] condition variable not set");
     return EXIT_ERROR;
   }
 
-  switch(flag){
+  switch(flag) {
     case(TCP_INITATOR):
-      if(serverIP == NULL){
+      if(serverIP == NULL) {
         perror("[ERROR] serverIP NULL");
         return EXIT_ERROR;
       }
@@ -111,7 +113,7 @@ int cmu_socket(cmu_socket_t* dst, int flag, int port, char* serverIP) {
     perror("[ERROR] handshake failed");
     return EXIT_ERROR;
   }
-  if (flag == TCP_LISTENER &&  server_handshake(dst) < 0 ){
+  if (flag == TCP_LISTENER &&  server_handshake(dst) < 0 ) {
     perror("[ERROR] handshake failed");
     return EXIT_ERROR;
   }
@@ -141,21 +143,13 @@ int client_handshake(cmu_socket_t * sock) {
  *  Response ack when recieve the handshake request.
 */
 int server_handshake(cmu_socket_t * sock) {
-  while(sock->their_syn == FALSE){
+  while(sock->their_syn == FALSE) {
     check_for_data(sock, TIMEOUT);
   }
   flag_pkt_rdt_send(sock, 0, 1, SYN_FLAG_MASK | ACK_FLAG_MASK);
+  return 0;
 }
 
-int wave_hand(cmu_socket_t * sock){
-  while(pthread_mutex_lock(&(sock->send_lock)) != 0);
-  //等待把缓冲区的数据全部发完
-  while(sock->sending_len != 0 || sock->temp_data_size != 0)
-      pthread_cond_wait(&(sock->close_wait_cond), &(sock->send_lock));
-  flag_pkt_rdt_send(sock, sock->window.last_ack_received + 1,0,FIN_FLAG_MASK);
-  sock->my_fin = TRUE;
-  pthread_mutex_unlock(&(sock->send_lock));
-}
 /*
  * Param: sock - The socket to close.
  *
@@ -164,8 +158,7 @@ int wave_hand(cmu_socket_t * sock){
  * Return: Returns error code information on the close operation.
  *
  */
-int cmu_close(cmu_socket_t * sock){
-
+int cmu_close(cmu_socket_t * sock) {
   while(pthread_mutex_lock(&(sock->death_lock)) != 0);
 
   sock->dying = TRUE;
@@ -175,17 +168,37 @@ int cmu_close(cmu_socket_t * sock){
   wave_hand(sock);
   pthread_join(sock->thread_id, NULL); 
 
-  if(sock != NULL){
+  if(sock != NULL) {
     if(sock->received_buf != NULL)
       free(sock->received_buf);
     if(sock->sending_buf != NULL)
       free(sock->sending_buf);
   }
   else{
-    perror("ERORR Null scoket\n");
+    perror("[ERORR] NULL scoket");
     return EXIT_ERROR;
   }
   return close(sock->socket);
+}
+
+/**
+ * Param: sock - The socket to wave hand to close.
+ * 
+ * Purpose: Wave hand to close tcp socket.
+ *  It will send all remain data before send FIN packet.
+*/
+int wave_hand(cmu_socket_t * sock) {
+  while(pthread_mutex_lock(&(sock->send_lock)) != 0);
+
+  // send remain data
+  while(sock->sending_len != 0 || sock->temp_data_size != 0)
+      pthread_cond_wait(&(sock->close_wait_cond), &(sock->send_lock));
+  flag_pkt_rdt_send(sock, sock->window.last_ack_received+1, 0, FIN_FLAG_MASK);
+
+  pthread_mutex_unlock(&(sock->send_lock));
+
+  sock->my_fin = TRUE;
+  return 0;
 }
 
 /*
@@ -201,41 +214,39 @@ int cmu_close(cmu_socket_t * sock){
  *  in the dst buffer, and error information is returned. 
  *
  */
-int cmu_read(cmu_socket_t * sock, char* dst, int length, int flags){
+int cmu_read(cmu_socket_t * sock, char* dst, int length, int flags) {
   char* new_buf;
   int read_len = 0;
 
-  if(length < 0){
-    perror("ERROR negative length");
+  if(length < 0) {
+    perror("[ERROR] negative length");
     return EXIT_ERROR;
   }
 
-  while(pthread_mutex_lock(&(sock->recv_lock)) != 0);
+  while (pthread_mutex_lock(&(sock->recv_lock)) != 0);
 
-  switch(flags){
+  switch (flags) {
     case NO_FLAG:
-      while(sock->received_len == 0 && !sock->their_fin){
+      while (sock->received_len == 0 && !sock->their_fin) {
         pthread_cond_wait(&(sock->wait_cond), &(sock->recv_lock)); 
       }
     case NO_WAIT:
-      if(sock->received_len > 0){
-        if(sock->received_len > length)
+      if (sock->received_len > 0) {
+        if (sock->received_len > length)
           read_len = length;
         else
           read_len = sock->received_len;
 
         memcpy(dst, sock->received_buf, read_len);
 
-        if(read_len < sock->received_len){
-          //将socket剩下的部分拷贝到新的缓冲区，free原本的缓冲区(这个操作似乎有点智障啊，算啦，不改
-           new_buf = malloc(sock->received_len - read_len);
-           memcpy(new_buf, sock->received_buf + read_len, 
-            sock->received_len - read_len);
-           free(sock->received_buf);
-           sock->received_len -= read_len;
-           sock->received_buf = new_buf;
+        if (read_len < sock->received_len) {
+          new_buf = malloc(sock->received_len - read_len);
+          memcpy(new_buf, sock->received_buf+read_len, sock->received_len-read_len);
+          free(sock->received_buf);
+          sock->received_len -= read_len;
+          sock->received_buf = new_buf;
         }
-        else{
+        else {
           free(sock->received_buf);
           sock->received_buf = NULL;
           sock->received_len = 0;
@@ -243,7 +254,7 @@ int cmu_read(cmu_socket_t * sock, char* dst, int length, int flags){
       }
       break;
     default:
-      perror("ERROR Unknown flag.\n");
+      perror("[ERROR] Unknown flag");
       read_len = EXIT_ERROR;
   }
   pthread_mutex_unlock(&(sock->recv_lock));
@@ -261,13 +272,13 @@ int cmu_read(cmu_socket_t * sock, char* dst, int length, int flags){
  *  error information is returned. 
  *
  */
-int cmu_write(cmu_socket_t * sock, char* src, int length){
+int cmu_write(cmu_socket_t * sock, char* src, int length) {
   while(pthread_mutex_lock(&(sock->send_lock)) != 0);
   if(sock->sending_buf == NULL)
     sock->sending_buf = calloc(length,1);
   else
-    sock->sending_buf = realloc(sock->sending_buf, length + sock->sending_len);//realloc 会将原本的数据内容拷贝到新的缓冲区
-  memcpy(sock->sending_buf + sock->sending_len, src, length);
+    sock->sending_buf = realloc(sock->sending_buf, length+sock->sending_len);
+  memcpy(sock->sending_buf+sock->sending_len, src, length);
   sock->sending_len += length;
 
   pthread_mutex_unlock(&(sock->send_lock));

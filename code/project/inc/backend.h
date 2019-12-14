@@ -10,5 +10,6 @@
 int check_ack(cmu_socket_t * dst, uint32_t seq);
 void check_for_data(cmu_socket_t * dst, int flags);
 void * begin_backend(void * in);
+void flag_pkt_rdt_send(cmu_socket_t* sock, int seq, int ack, uint8_t flags);
 
 #endif

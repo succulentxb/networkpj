@@ -27,7 +27,7 @@ int check_ack(cmu_socket_t * sock, uint32_t seq);
 void edit_timer(cmu_socket_t *sock);
 
 //根据send_base重发数据包
-void re_send(cmu_socket_t * sock);
+void resend(cmu_socket_t * sock);
 
 //获取最小的窗口大小
 uint32_t get_min_window_size(cmu_socket_t *sock);
@@ -73,7 +73,7 @@ void update_cc_state(cmu_socket_t * sock,int reason){
          sock->dup_ack++;
          if (sock->dup_ack == 3){
               sock->dup_ack = 0;
-              re_send(sock);          
+              resend(sock);          
          }
          break;
       case DELAY:
@@ -379,7 +379,7 @@ void send_datas(cmu_socket_t *sock, char *data, int buf_len, uint32_t seq_from){
   }
 }
 //收到三次冗余ACK重发
-void re_send(cmu_socket_t * sock){
+void resend(cmu_socket_t * sock){
     //puts("re_send");
     if (sock->temp_data == NULL)
       return;
