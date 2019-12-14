@@ -18,7 +18,7 @@ uint32_t get_rwnd(cmu_socket_t * sock);
 uint32_t get_cwnd(cmu_socket_t * sock);
 
 //修改拥塞控制窗口大小
-void change_congestion_control_state(cmu_socket_t * sock,int reason);
+void update_cc_state(cmu_socket_t * sock,int reason);
 
 //检查ack 是否收到
 int check_ack(cmu_socket_t * sock, uint32_t seq);
@@ -67,26 +67,26 @@ uint32_t get_cwnd(cmu_socket_t * sock){
 }
 
 //修改cwnd,原因有：TIMEOUT 和 收到三个冗余ack,收到正常的ACK
-void change_congestion_control_state(cmu_socket_t * sock,int reason){
+void update_cc_state(cmu_socket_t * sock,int reason){
     switch (reason){
       case DUPLICATE_ACK:
-         sock->duplicated_ACK++;
-         if (sock->duplicated_ACK == 3){
-              sock->duplicated_ACK = 0;
+         sock->dup_ack++;
+         if (sock->dup_ack == 3){
+              sock->dup_ack = 0;
               re_send(sock);          
          }
          break;
       case DELAY:
               sock->wmax = sock->cwnd;
               sock->cwnd = sock->cwnd /2 < MSS ? MSS:sock->cwnd /2;
-              sock->duplicated_ACK = 0;
+              sock->dup_ack = 0;
               sock->status = NORMAL;
               //超时重传实现在begin_send 中
               return;
           
          break;
       case NEW_ACK:
-          sock->duplicated_ACK = 0;
+          sock->dup_ack = 0;
           if (sock->status == NORMAL){
               sock->cwnd = (sock->cwnd + sock->wmax)/2 + MSS;
               if (sock->cwnd > sock->wmax)
@@ -185,7 +185,7 @@ void reliable_flags_packet_send(cmu_socket_t * sock,int seq,int ack,uint8_t flag
     while(TRUE){
         puts("send flags");
         sendto(sock->socket, rsp, DEFAULT_HEADER_LEN, 0, (struct sockaddr*) &(sock->conn), conn_len_for_send);
-        int result = check_for_data(sock, TIMEOUT);
+        check_for_data(sock, TIMEOUT);
         //printf("seq = %d last_ack_received = %d result = %d\n", seq ,sock->window.last_ack_received,result);
         if (check_ack(sock,seq+1) == TRUE){
             //printf("seq = %d last_ack_received = %d\n",seq,sock->window.last_ack_received);
@@ -237,33 +237,33 @@ void handle_message(cmu_socket_t * sock, char* pkt){
         edit_rwnd(sock,advertised_window);
         //收到冗余ACK
         if (get_ack(pkt) == sock->window.last_ack_received){
-            change_congestion_control_state(sock,DUPLICATE_ACK);        
+            update_cc_state(sock,DUPLICATE_ACK);        
         }
         //如果ack序号大于之前的，更新收到的ack序号
         if(get_ack(pkt) > sock->window.last_ack_received) {
             gettimeofday(&sock->recv_time,NULL);
             edit_timer(sock);
             sock->window.last_ack_received = get_ack(pkt);
-            change_congestion_control_state(sock,NEW_ACK);
+            update_cc_state(sock,NEW_ACK);
         }
         //printf("receive ack is %d \n",get_ack(pkt) );
         return;
     }
 
 
-    //printf("receive seq is %d, next_seq_to_received is %d\n",seq,sock->window.next_seq_to_received);
+    //printf("receive seq is %d, expected_rev_seq is %d\n",seq,sock->window.expected_rev_seq);
     //printf("datalen is %d \n",get_plen(pkt) - DEFAULT_HEADER_LEN);
     //如果达到的seq 和期望不一致，立即发送冗余ACK，指示下一个期待的字节序号
-    if (seq != sock->window.next_seq_to_received && sock->window.next_seq_to_received > 0 ){
-        //printf("recv seq = %d next_seq_to_received = %d\n", seq,sock->window.next_seq_to_received);
-        send_ack(sock,sock->window.next_seq_to_received);
+    if (seq != sock->window.expected_rev_seq && sock->window.expected_rev_seq > 0 ){
+        //printf("recv seq = %d expected_rev_seq = %d\n", seq,sock->window.expected_rev_seq);
+        send_ack(sock,sock->window.expected_rev_seq);
         return;
     }
 
     //如果收到新的包，并且新的包的序号等于下一个要接收的包的序号，将新的包内容放入缓冲区,发送ACK
-    if(seq == sock->window.next_seq_to_received){
+    if(seq == sock->window.expected_rev_seq){
         data_len = get_plen(pkt) - DEFAULT_HEADER_LEN;
-        sock->window.next_seq_to_received = seq + data_len; 
+        sock->window.expected_rev_seq = seq + data_len; 
         //printf("datalen = %d seq = %d\n",data_len, seq);
         if(sock->received_buf == NULL){
             sock->received_buf = malloc(data_len);
@@ -285,8 +285,11 @@ void handle_message(cmu_socket_t * sock, char* pkt){
  * Purpose: To check for data received by the socket. 
  *
  */
-int check_for_data(cmu_socket_t * sock, int flags){
+void check_for_data(cmu_socket_t* sock, int flags) {
+  check_for_data_inner(sock, flags);
+}
 
+int check_for_data_inner(cmu_socket_t* sock, int flags) {
   char hdr[DEFAULT_HEADER_LEN];
   char* pkt;
   socklen_t conn_len = sizeof(sock->conn);
@@ -296,47 +299,52 @@ int check_for_data(cmu_socket_t * sock, int flags){
   struct timeval time_out;
   time_out.tv_sec = 3;
   time_out.tv_usec = 0;
+  int total_len = 0;
 
 
   while(pthread_mutex_lock(&(sock->recv_lock)) != 0);
-  switch(flags){
+  switch(flags) {
     case NO_FLAG:
       len = recvfrom(sock->socket, hdr, DEFAULT_HEADER_LEN, MSG_PEEK,
                 (struct sockaddr *) &(sock->conn), &conn_len);
       break;
+
     case TIMEOUT:
       FD_ZERO(&ackFD);
       FD_SET(sock->socket, &ackFD);
       time_out = sock->timeout_interval;
-      if(select(sock->socket+1, &ackFD, NULL, NULL, &time_out) <= 0){
+      if(select(sock->socket+1, &ackFD, NULL, NULL, &time_out) <= 0) {
         break;
       }
+
     case NO_WAIT:
-      len = recvfrom(sock->socket, hdr, DEFAULT_HEADER_LEN, MSG_DONTWAIT | MSG_PEEK,
-               (struct sockaddr *) &(sock->conn), &conn_len);
+      len = recvfrom(sock->socket, hdr, DEFAULT_HEADER_LEN, MSG_DONTWAIT | MSG_PEEK, 
+          (struct sockaddr*) &(sock->conn), &conn_len);
       break;
+
     default:
-      perror("ERROR unknown flag");
+      perror("[ERROR] unknown flag");
   }
-  int total = 0;
-  total = len;
-  while(len >= DEFAULT_HEADER_LEN){
+  
+  total_len = len;
+  while(len >= DEFAULT_HEADER_LEN) {
     plen = get_plen(hdr);
     pkt = malloc(plen);
     buf_size = 0;
-    while(buf_size < plen ){
-        n = recvfrom(sock->socket, pkt + buf_size, plen - buf_size, 
-          NO_FLAG, (struct sockaddr *) &(sock->conn), &conn_len);
+    while(buf_size < plen) {
+      n = recvfrom(sock->socket, pkt + buf_size, plen - buf_size, 
+          NO_FLAG, (struct sockaddr*) &(sock->conn), &conn_len);
       buf_size = buf_size + n;
     }
     handle_message(sock, pkt);
     free(pkt);
+    len = 0;
     len = recvfrom(sock->socket, hdr, DEFAULT_HEADER_LEN, MSG_DONTWAIT | MSG_PEEK,
                (struct sockaddr *) &(sock->conn), &conn_len); 
-    total = total + len;   
+    total_len = total_len + len;
   }
   pthread_mutex_unlock(&(sock->recv_lock));
-  return total;
+  return total_len;
 }
 
 //发送数据
@@ -424,7 +432,7 @@ void begin_send(cmu_socket_t * sock){
           if (is_timeout(sock,&time1,&time2)){
               sock->edit_time_flag = FALSE;
  
-              change_congestion_control_state(sock,DELAY);
+              update_cc_state(sock,DELAY);
               break;
           }
         }
@@ -473,7 +481,7 @@ void* begin_backend(void * in){
           //设置时间为2 * Maximum segment lifetime
           dst->timeout_interval.tv_sec = 10 * dst->timeout_interval.tv_sec;
           dst->timeout_interval.tv_usec = 10 * dst->timeout_interval.tv_usec;
-          if (check_for_data(dst,TIMEOUT) == 0)
+          if (check_for_data_inner(dst,TIMEOUT) == 0)
             break;
       }
 

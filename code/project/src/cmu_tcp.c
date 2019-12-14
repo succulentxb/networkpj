@@ -16,7 +16,6 @@ int server_handshake(cmu_socket_t * sock);
  *  and the value returned will provide error information. 
  *
  */
-
 int cmu_socket(cmu_socket_t* dst, int flag, int port, char* serverIP) {
   int sockfd, optval;
   socklen_t len;
@@ -41,7 +40,7 @@ int cmu_socket(cmu_socket_t* dst, int flag, int port, char* serverIP) {
   dst->dying = FALSE;
   pthread_mutex_init(&(dst->death_lock), NULL);
   dst->window.last_ack_received = 0;
-  dst->window.next_seq_to_received = 0;
+  dst->window.expected_rev_seq = 0;
   dst->edit_time_flag = FALSE;
   pthread_mutex_init(&(dst->window.ack_lock), NULL);
 
@@ -117,7 +116,7 @@ int cmu_socket(cmu_socket_t* dst, int flag, int port, char* serverIP) {
     return EXIT_ERROR;
   }
 
-  dst->window.next_seq_to_received = 1;
+  dst->window.expected_rev_seq = 1;
   dst->window.last_ack_received = 1;
   dst->temp_data_size = 0;
 
@@ -125,17 +124,27 @@ int cmu_socket(cmu_socket_t* dst, int flag, int port, char* serverIP) {
   return EXIT_SUCCESS;
 }
 
+/**
+ * Param: sock - client socket to do handshake
+ * 
+ * Purpose: Do handshake with server.
+*/
 int client_handshake(cmu_socket_t * sock) {
-  reliable_flags_packet_send(sock, 0, 0, SYN_FLAG_MASK);
+  flag_pkt_rdt_send(sock, 0, 0, SYN_FLAG_MASK);
   return 0;
 }
 
+/**
+ * Param: sock - server socket to do handshake
+ * 
+ * Purpose: Wating for tcp client socket handshake packet.
+ *  Response ack when recieve the handshake request.
+*/
 int server_handshake(cmu_socket_t * sock) {
   while(sock->their_syn == FALSE){
-    check_for_data(sock,TIMEOUT);
+    check_for_data(sock, TIMEOUT);
   }
-  puts("server send syn");
-  reliable_flags_packet_send(sock,0,1,SYN_FLAG_MASK | ACK_FLAG_MASK);
+  flag_pkt_rdt_send(sock, 0, 1, SYN_FLAG_MASK | ACK_FLAG_MASK);
 }
 
 int wave_hand(cmu_socket_t * sock){
@@ -143,7 +152,7 @@ int wave_hand(cmu_socket_t * sock){
   //等待把缓冲区的数据全部发完
   while(sock->sending_len != 0 || sock->temp_data_size != 0)
       pthread_cond_wait(&(sock->close_wait_cond), &(sock->send_lock));
-  reliable_flags_packet_send(sock,sock->window.last_ack_received + 1,0,FIN_FLAG_MASK);
+  flag_pkt_rdt_send(sock, sock->window.last_ack_received + 1,0,FIN_FLAG_MASK);
   sock->my_fin = TRUE;
   pthread_mutex_unlock(&(sock->send_lock));
 }
