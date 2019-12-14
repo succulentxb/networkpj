@@ -33,7 +33,7 @@ build_dir:
 	mkdir -p $(BUILD_DIR)
 
 # run tests
-test: all testing_server
+test: client server testing_server
 	head -c 100M </dev/urandom > $(TEST_DIR)/random.input
 	sudo python2 -m pytest -vs -p no:warnings $(TEST_DIR)
 

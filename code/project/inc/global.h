@@ -25,6 +25,7 @@ typedef struct {
 	uint32_t last_ack_received;
 	pthread_mutex_t ack_lock;
 	uint32_t last_send_base;
+	int need_ack;
 } window_t;
 
 typedef struct {
@@ -43,8 +44,8 @@ typedef struct {
 	pthread_cond_t wait_cond;
 	pthread_cond_t close_wait_cond;
 
-	char* temp_data;
-	uint32_t temp_data_size;
+	char* tmp_buf;
+	uint32_t tmp_len;
 	char* sending_buf;
 	int sending_len;
 	int type;

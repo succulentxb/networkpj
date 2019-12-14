@@ -57,8 +57,8 @@ int cmu_socket(cmu_socket_t* dst, int flag, int port, char* serverIP) {
 
   dst->their_fin = FALSE;
   dst->their_syn = FALSE;
-  dst->temp_data = NULL;
-  dst->temp_data_size = 0;
+  dst->tmp_buf = NULL;
+  dst->tmp_len = 0;
 
   if(pthread_cond_init(&dst->wait_cond, NULL) != 0) {
     perror("[ERROR] condition variable not set");
@@ -120,7 +120,7 @@ int cmu_socket(cmu_socket_t* dst, int flag, int port, char* serverIP) {
 
   dst->window.expected_rev_seq = 1;
   dst->window.last_ack_received = 1;
-  dst->temp_data_size = 0;
+  dst->tmp_len = 0;
 
   pthread_create(&(dst->thread_id), NULL, begin_backend, (void *)dst);  
   return EXIT_SUCCESS;
@@ -191,7 +191,7 @@ int wave_hand(cmu_socket_t * sock) {
   while(pthread_mutex_lock(&(sock->send_lock)) != 0);
 
   // send remain data
-  while(sock->sending_len != 0 || sock->temp_data_size != 0)
+  while(sock->sending_len != 0 || sock->tmp_len != 0)
       pthread_cond_wait(&(sock->close_wait_cond), &(sock->send_lock));
   flag_pkt_rdt_send(sock, sock->window.last_ack_received+1, 0, FIN_FLAG_MASK);
 
@@ -224,12 +224,16 @@ int cmu_read(cmu_socket_t * sock, char* dst, int length, int flags) {
   }
 
   while (pthread_mutex_lock(&(sock->recv_lock)) != 0);
+  printf("[DEBUG] [cmu_read] get recv_lock\n");
 
   switch (flags) {
     case NO_FLAG:
       while (sock->received_len == 0 && !sock->their_fin) {
+        printf("[DEBUG] [cmu_read] recieve_len=0, release lock, waiting for signal\n");
         pthread_cond_wait(&(sock->wait_cond), &(sock->recv_lock)); 
+        printf("[DEBUG] [cmu_read] get signal and lock, recieve_len=%d\n", sock->received_len);
       }
+      printf("[DEBUG] [cmu_read] start read from socket fd, enter NO_WAIT\n");
     case NO_WAIT:
       if (sock->received_len > 0) {
         if (sock->received_len > length)
@@ -272,10 +276,10 @@ int cmu_read(cmu_socket_t * sock, char* dst, int length, int flags) {
  *  error information is returned. 
  *
  */
-int cmu_write(cmu_socket_t * sock, char* src, int length) {
+int cmu_write(cmu_socket_t* sock, char* src, int length) {
   while(pthread_mutex_lock(&(sock->send_lock)) != 0);
   if(sock->sending_buf == NULL)
-    sock->sending_buf = calloc(length,1);
+    sock->sending_buf = calloc(length, 1);
   else
     sock->sending_buf = realloc(sock->sending_buf, length+sock->sending_len);
   memcpy(sock->sending_buf+sock->sending_len, src, length);

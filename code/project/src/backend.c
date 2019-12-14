@@ -42,6 +42,7 @@ void flag_pkt_rdt_send(cmu_socket_t* sock, int seq, int ack, uint8_t flags) {
   pkt = create_packet_buf(sock->my_port, ntohs(sock->conn.sin_port), seq, ack, 
       DEFAULT_HEADER_LEN, DEFAULT_HEADER_LEN, flags, adv_window, 0, NULL, NULL, 0);
 
+  printf("[DEBUG] [flag_pkt_rdt_send] send flags packet, seq=%d, ack=%d, flags=%d\n", seq, ack, flags);
   while (TRUE) {
     sendto(sock->socket, pkt, DEFAULT_HEADER_LEN, 0, (struct sockaddr*) &(sock->conn), conn_len);
     check_for_data(sock, TIMEOUT);
@@ -199,14 +200,15 @@ int check_ack(cmu_socket_t * sock, uint32_t seq) {
  * Purpose: Send an ack packet.
 */
 void send_ack(cmu_socket_t* sock, uint32_t ack) {
-    char* pkt;
-    socklen_t conn_len = sizeof(sock->conn); 
-    uint32_t adv_window = get_adv_window(sock);
+  char* pkt;
+  socklen_t conn_len = sizeof(sock->conn); 
+  uint32_t adv_window = get_adv_window(sock);
 
-    pkt = create_packet_buf(sock->my_port, ntohs(sock->conn.sin_port), 0, ack, 
-        DEFAULT_HEADER_LEN, DEFAULT_HEADER_LEN, ACK_FLAG_MASK, adv_window, 0, NULL, NULL, 0);
-    sendto(sock->socket, pkt, DEFAULT_HEADER_LEN, 0, (struct sockaddr*) &(sock->conn), conn_len);
-    free(pkt);
+  printf("[DEBUG] [send_ack] ack=%d\n", ack);
+  pkt = create_packet_buf(sock->my_port, ntohs(sock->conn.sin_port), sock->window.last_ack_received, ack, 
+      DEFAULT_HEADER_LEN, DEFAULT_HEADER_LEN, ACK_FLAG_MASK, adv_window, 0, NULL, NULL, 0);
+  sendto(sock->socket, pkt, DEFAULT_HEADER_LEN, 0, (struct sockaddr*) &(sock->conn), conn_len);
+  free(pkt);
 }
 
 /*
@@ -222,6 +224,7 @@ void handle_message(cmu_socket_t * sock, char* pkt) {
     uint32_t seq = get_seq(pkt);
     uint32_t data_len;
 
+    printf("[DEBUG] [handle_message] flags=%d, seq=%d, ack=%d, plen=%d\n", flags, seq, get_ack(pkt), get_plen(pkt));
     // response ACK when recieve FIN
     if (flags & FIN_FLAG_MASK) {
       sock->their_fin = TRUE;
@@ -235,14 +238,15 @@ void handle_message(cmu_socket_t * sock, char* pkt) {
 
       // It does not matter with lock because it is processing handshake.
       while(pthread_mutex_lock(&(sock->window.ack_lock)) != 0);
-      sock->window.expected_rev_seq = get_seq(pkt)+1;
+      sock->window.expected_rev_seq = seq+1;
       pthread_mutex_unlock(&(sock->window.ack_lock));
 
       if(flags & ACK_FLAG_MASK) {
         while(pthread_mutex_lock(&(sock->window.ack_lock)) != 0);
         sock->window.last_ack_received = get_ack(pkt);
+        sock->window.need_ack = TRUE;
         pthread_mutex_unlock(&(sock->window.ack_lock));
-        send_ack(sock, seq+1);
+        // send_ack(sock, seq+1);
       }
       return;
     }
@@ -253,28 +257,34 @@ void handle_message(cmu_socket_t * sock, char* pkt) {
 
       // duplicated ack
       if (get_ack(pkt) == sock->window.last_ack_received) {
-        update_cc_state(sock, DUP_ACK);        
+        printf("[DEBUG] [handle_message] get dup ack\n");
+        update_cc_state(sock, DUP_ACK);
+        return;
       }
-      // normal ack
+      // normal ack, normal ack packet may contain actual data load, not return
       if(get_ack(pkt) > sock->window.last_ack_received) {
+        printf("[DEBUG] [handle_message] get normal ack=%d, last_ack_recv=%d\n", get_ack(pkt), sock->window.last_ack_received);
         gettimeofday(&sock->recv_time, NULL);
         update_timer(sock);
         sock->window.last_ack_received = get_ack(pkt);
         update_cc_state(sock, NEW_ACK);
+
+        // return if packet is just normal ack without actual load
+        if (get_plen(pkt) == DEFAULT_HEADER_LEN)
+          return;
       }
     }
 
-
     // send duplicated ack and expected seq when recieve unexpected seq
     if (seq != sock->window.expected_rev_seq && sock->window.expected_rev_seq > 0 ) {
-        send_ack(sock, sock->window.expected_rev_seq);
-        return;
+      printf("[DEBUG] [handle_message] unexpected seq=%d, expected seq=%d\n", seq, sock->window.expected_rev_seq);
+      send_ack(sock, sock->window.expected_rev_seq);
+      return;
     }
 
     // normal seq to get
     if(seq == sock->window.expected_rev_seq) {
-      while(pthread_mutex_lock(&(sock->recv_lock)) != 0);
-
+      printf("[DEBUG] [handle_message] expected seq=%d\n", seq);
       data_len = get_plen(pkt) - DEFAULT_HEADER_LEN;
       sock->window.expected_rev_seq = seq + data_len; 
       if(sock->received_buf == NULL) {
@@ -286,9 +296,8 @@ void handle_message(cmu_socket_t * sock, char* pkt) {
       memcpy(sock->received_buf + sock->received_len, pkt + DEFAULT_HEADER_LEN, data_len);
       sock->received_len += data_len;
 
-      pthread_mutex_unlock(&(sock->recv_lock));
-
-      send_ack(sock, seq+data_len);
+      printf("[DEBUG] [handle_message] recieve data copy to buffer done, to send ack\n");
+      send_ack(sock, sock->window.expected_rev_seq);
     }
 }
 
@@ -337,13 +346,16 @@ int check_for_data_inner(cmu_socket_t* sock, int flags) {
       FD_ZERO(&ackFD);
       FD_SET(sock->socket, &ackFD);
       time_out = sock->timeout_interval;
-      if(select(sock->socket+1, &ackFD, NULL, NULL, &time_out) <= 0) {
+      int stat;
+      if((stat = select(sock->socket+1, &ackFD, NULL, NULL, &time_out)) <= 0) {
+        printf("[DEBUG] [check_for_data_inner] select failed, stat=%d\n", stat);
         break;
       }
 
     case NO_WAIT:
       len = recvfrom(sock->socket, hdr, DEFAULT_HEADER_LEN, MSG_DONTWAIT | MSG_PEEK, 
           (struct sockaddr*) &(sock->conn), &conn_len);
+      printf("[DEBUG] [check_for_data_inner] recieve data case NO_WAIT, len=%d\n", (int)len);
       break;
 
     default:
@@ -361,6 +373,7 @@ int check_for_data_inner(cmu_socket_t* sock, int flags) {
           NO_FLAG, (struct sockaddr*) &(sock->conn), &conn_len);
       buf_size = buf_size + n;
     }
+    printf("[DEBUG] [check_for_data_inner] recieve whole packet, plen=%d\n", plen);
     handle_message(sock, pkt);
     free(pkt);
 
@@ -384,30 +397,46 @@ int check_for_data_inner(cmu_socket_t* sock, int flags) {
 */
 void send_datas(cmu_socket_t* sock, char* data, int buf_len, uint32_t seq_from) {
   char* msg;
-  char* data_offset = data;
+  int sent_len = 0;
   int plen;
   int sockfd = sock->socket;
   size_t conn_len = sizeof(sock->conn);
   uint32_t seq = seq_from;
   uint32_t adv_window = get_adv_window(sock);
+  uint8_t flags = NO_FLAG;
+  int ack = 0;
 
+  printf("[DEBUG] [send_datas] send data, len=%d, seq=%d\n", buf_len, seq);
   if(buf_len > 0) {
     while(buf_len != 0) {
+
+      // TODO: ack flag transfer is not rdt
+      while (pthread_mutex_lock(&(sock->window.ack_lock)) != 0);
+      if (sock->window.need_ack) {
+        flags = ACK_FLAG_MASK;
+        ack = sock->window.expected_rev_seq;
+        sock->window.need_ack = FALSE;
+      }
+      pthread_mutex_unlock(&(sock->window.ack_lock));
+
       if(buf_len <= MAX_DLEN) {
         plen = DEFAULT_HEADER_LEN + buf_len;
-        msg = create_packet_buf(sock->my_port, sock->their_port, seq, 0, DEFAULT_HEADER_LEN, plen, NO_FLAG, adv_window, 0, NULL, data_offset, buf_len);
+        msg = create_packet_buf(sock->my_port, sock->their_port, seq, ack, 
+            DEFAULT_HEADER_LEN, plen, flags, adv_window, 0, NULL, data+sent_len, buf_len);
         buf_len = 0;
         seq = seq + buf_len;
       }
       else {
         plen = DEFAULT_HEADER_LEN + MAX_DLEN;
-        msg = create_packet_buf(sock->my_port, sock->their_port, seq, 0, DEFAULT_HEADER_LEN, plen, NO_FLAG, adv_window, 0, NULL, data_offset, MAX_DLEN);
+        msg = create_packet_buf(sock->my_port, sock->their_port, seq, ack, 
+            DEFAULT_HEADER_LEN, plen, flags, adv_window, 0, NULL, data+sent_len, MAX_DLEN);
         buf_len = buf_len - MAX_DLEN;
         seq = seq + MAX_DLEN;
       }
+      printf("[DEBUG] [send_datas] send packet, plen=%d, seq=%d\n", plen, get_seq(msg));
       sendto(sockfd, msg, plen, 0, (struct sockaddr*) &(sock->conn), conn_len);
       free(msg);
-      data_offset = data_offset + plen - DEFAULT_HEADER_LEN;
+      sent_len = sent_len + (plen - DEFAULT_HEADER_LEN);
     }
   }
 }
@@ -423,7 +452,7 @@ void resend(cmu_socket_t * sock) {
   uint32_t sent_size;
   uint32_t send_len;
 
-  if (sock->temp_data == NULL)
+  if (sock->tmp_buf == NULL)
     return;
 
   while (pthread_mutex_lock(&(sock->time_lock)));
@@ -437,12 +466,12 @@ void resend(cmu_socket_t * sock) {
   min_window = min_window_size(sock);
 
   sent_size = (sock->window.last_ack_received - sock->window.last_send_base);
-  if (sock->temp_data_size-sent_size < min_window)
-    send_len = sock->temp_data_size - sent_size;
+  if (sock->tmp_len-sent_size < min_window)
+    send_len = sock->tmp_len - sent_size;
   else
     send_len = min_window;
 
-  send_datas(sock, sock->temp_data+sent_size, send_len, send_base);
+  send_datas(sock, sock->tmp_buf+sent_size, send_len, send_base);
 }
 
 /**
@@ -465,41 +494,43 @@ void begin_send(cmu_socket_t * sock) {
 
     min_window = min_window_size(sock);
 
-    while(pthread_mutex_lock(&(sock->send_lock)) != 0);
-    uint32_t buf_len = sock->sending_len;  
-    if (sock->temp_data_size < min_window && buf_len > 0) {
-      sock->temp_data = realloc(sock->temp_data, min_window);
-      
-      size_incr = (min_window - sock->temp_data_size) < buf_len ? (min_window - sock->temp_data_size): buf_len;
-      if (min_window-sock->temp_data_size < buf_len)
-        size_incr = min_window - sock->temp_data_size;
+    while (pthread_mutex_lock(&(sock->send_lock)) != 0);
+    uint32_t buf_len = sock->sending_len;
+    printf("[DEBUG] [begin_send] get send_lock, buf_len=%d, min_w=%d, tmp_len=%d\n", buf_len, min_window, sock->tmp_len);
+    if (sock->tmp_len < min_window && buf_len > 0) {
+      sock->tmp_buf = realloc(sock->tmp_buf, min_window);
+
+      if (min_window - sock->tmp_len < buf_len)
+        size_incr = min_window - sock->tmp_len;
       else
         size_incr = buf_len;
 
-      sock->temp_data_size = sock->temp_data_size + size_incr;
-      memcpy(sock->temp_data, sock->sending_buf, size_incr);
-      left_len = buf_len - size_incr;
+      sock->tmp_len = sock->tmp_len + size_incr;
+      memcpy(sock->tmp_buf, sock->sending_buf, size_incr);
 
+      left_len = buf_len - size_incr;
       char* left_data = calloc(buf_len - size_incr, 1);
       memcpy(left_data, sock->sending_buf+size_incr, buf_len-size_incr);
       free(sock->sending_buf);
       sock->sending_buf = left_data;
       sock->sending_len = left_len;
     }
+    printf("[DEBUG] [begin_send] to release lock, buf_len=%d, tmp_len=%d\n", sock->sending_len, sock->tmp_len);
     pthread_mutex_unlock(&(sock->send_lock));
 
-    if (sock->temp_data_size < 1) {
+    if (sock->tmp_len == 0) {
       break;
     }
 
     while (pthread_mutex_lock(&(sock->time_lock)) != 0);
     gettimeofday(&sock->send_time, NULL);
     pthread_mutex_unlock(&(sock->time_lock));
-        
+
     struct timeval start_time;
     struct timeval end_time;
     gettimeofday(&start_time, NULL);
-    send_datas(sock, sock->temp_data, sock->temp_data_size, sock->window.last_ack_received);
+    printf("[DEBUG] [begin_send] start send_datas\n");
+    send_datas(sock, sock->tmp_buf, sock->tmp_len, sock->window.last_ack_received);
     while (TRUE) {
       check_for_data(sock, TIMEOUT);
       gettimeofday(&end_time, NULL);
@@ -518,26 +549,26 @@ void begin_send(cmu_socket_t * sock) {
     }
 
     sent_size = sock->window.last_ack_received - sock->window.last_send_base;
-    sock->temp_data_size = sock->temp_data_size - sent_size;
-    if (sock->temp_data_size == 0) {
+    sock->tmp_len = sock->tmp_len - sent_size;
+    if (sock->tmp_len == 0) {
       while (pthread_mutex_lock(&(sock->time_lock)) != 0);
       sock->edit_time_flag = TRUE;
       pthread_mutex_unlock(&(sock->time_lock));
     }
 
-    new_data = malloc(sock->temp_data_size);
-    memcpy(new_data, sock->temp_data+sent_size, sock->temp_data_size);
+    new_data = malloc(sock->tmp_len);
+    memcpy(new_data, sock->tmp_buf+sent_size, sock->tmp_len);
     
     while(pthread_mutex_lock(&(sock->send_lock)) != 0);
-    free(sock->temp_data);
-    sock->temp_data = new_data;
+    free(sock->tmp_buf);
+    sock->tmp_buf = new_data;
     pthread_mutex_unlock(&(sock->send_lock));
   }
 
   while(pthread_mutex_lock(&(sock->send_lock)) != 0);
-  free(sock->temp_data);
-  sock->temp_data_size = 0;
-  sock->temp_data = NULL;
+  free(sock->tmp_buf);
+  sock->tmp_len = 0;
+  sock->tmp_buf = NULL;
   pthread_mutex_unlock(&(sock->send_lock));
 
   while (pthread_mutex_lock(&(sock->time_lock)));
@@ -560,13 +591,16 @@ void* begin_backend(void * in) {
     while(pthread_mutex_lock(&(dst->death_lock)) !=  0);
     death = dst->dying;
     pthread_mutex_unlock(&(dst->death_lock));
+    printf("[DEBUG] [begin_backend] check death=%d\n", death);
 
     while(pthread_mutex_lock(&(dst->send_lock)) != 0);
     buf_len = dst->sending_len;
     pthread_mutex_unlock(&(dst->send_lock));
+    printf("[DEBUG] [begin_backend] check buf_len=%d\n", buf_len);
 
     if(death && buf_len == 0 && dst->their_fin  && dst->my_fin) {
       // no data to send, socket wating for release
+      printf("[DEBUG] [begin_backend] no data to send, socket wating for release\n");
       while (TRUE) {
         dst->timeout_interval.tv_sec = 10 * dst->timeout_interval.tv_sec;
         dst->timeout_interval.tv_usec = 10 * dst->timeout_interval.tv_usec;
@@ -577,6 +611,7 @@ void* begin_backend(void * in) {
     }
 
     if(buf_len > 0) {
+      printf("[DEBUG] [begin_backend] begin send\n");
       begin_send(dst); 
     }
 
@@ -584,7 +619,7 @@ void* begin_backend(void * in) {
     buf_len = dst->sending_len;
     pthread_mutex_unlock(&(dst->send_lock));
 
-    if (buf_len == 0 && dst->temp_data_size == 0 && dst->dying) {
+    if (buf_len == 0 && dst->tmp_len == 0 && dst->dying) {
       pthread_cond_signal(&(dst->close_wait_cond)); 
     }
 

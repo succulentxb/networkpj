@@ -381,15 +381,15 @@ void send_datas(cmu_socket_t *sock, char *data, int buf_len, uint32_t seq_from){
 //收到三次冗余ACK重发
 void resend(cmu_socket_t * sock){
     //puts("re_send");
-    if (sock->temp_data == NULL)
+    if (sock->tmp_buf == NULL)
       return;
     sock->edit_time_flag = FALSE;
     uint32_t send_base = sock->window.last_ack_received;
     uint32_t min_window = get_min_window_size(sock);
     uint32_t have_sent_size = (sock->window.last_ack_received - sock->window.last_send_base);
-    uint32_t send_size = sock->temp_data_size - have_sent_size < min_window ? sock->temp_data_size - have_sent_size : min_window;
-    //printf("temp_data = %p send_size = %d \n", sock->temp_data,send_size);
-    send_datas(sock,sock->temp_data+have_sent_size,send_size,send_base);
+    uint32_t send_size = sock->tmp_len - have_sent_size < min_window ? sock->tmp_len - have_sent_size : min_window;
+    //printf("tmp_buf = %p send_size = %d \n", sock->tmp_buf,send_size);
+    send_datas(sock,sock->tmp_buf+have_sent_size,send_size,send_base);
 }
 //开始发送数据
 void begin_send(cmu_socket_t * sock){
@@ -401,12 +401,12 @@ void begin_send(cmu_socket_t * sock){
         min_window = get_min_window_size(sock);
         while(pthread_mutex_lock(&(sock->send_lock)) != 0);
         uint32_t buf_len = sock->sending_len;  
-        if (sock->temp_data_size < min_window && buf_len != 0){
-            //printf("temp_data_size = %d min_window = %d buf_len = %d last_send_base = %d\n", sock->temp_data_size,min_window,buf_len,sock->window.last_send_base);
-            sock->temp_data = realloc(sock->temp_data,min_window);
-            uint32_t add_size = (min_window - sock->temp_data_size) < buf_len ? (min_window - sock->temp_data_size): buf_len;
-            sock->temp_data_size = sock->temp_data_size + add_size;
-            memcpy(sock->temp_data,sock->sending_buf,add_size);
+        if (sock->tmp_len < min_window && buf_len != 0){
+            //printf("tmp_len = %d min_window = %d buf_len = %d last_send_base = %d\n", sock->tmp_len,min_window,buf_len,sock->window.last_send_base);
+            sock->tmp_buf = realloc(sock->tmp_buf,min_window);
+            uint32_t add_size = (min_window - sock->tmp_len) < buf_len ? (min_window - sock->tmp_len): buf_len;
+            sock->tmp_len = sock->tmp_len + add_size;
+            memcpy(sock->tmp_buf,sock->sending_buf,add_size);
             uint32_t left_size = buf_len - add_size;
             char * left_data = calloc(buf_len - add_size,1);
             memcpy(left_data,sock->sending_buf + add_size, buf_len - add_size);
@@ -415,7 +415,7 @@ void begin_send(cmu_socket_t * sock){
             sock->sending_len = left_size;
         }
         pthread_mutex_unlock(&(sock->send_lock));
-        if (sock->temp_data_size <= 0){
+        if (sock->tmp_len <= 0){
           break;
         }
         gettimeofday(&sock->send_time,NULL);
@@ -423,7 +423,7 @@ void begin_send(cmu_socket_t * sock){
         struct timeval time1;
         struct timeval time2;
         gettimeofday(&time1,NULL);
-        send_datas(sock,sock->temp_data,sock->temp_data_size,sock->window.last_ack_received);
+        send_datas(sock,sock->tmp_buf,sock->tmp_len,sock->window.last_ack_received);
         while (TRUE){
           check_for_data(sock, TIMEOUT);
           gettimeofday(&time2,NULL);
@@ -437,18 +437,18 @@ void begin_send(cmu_socket_t * sock){
           }
         }
         int have_sent_size = (sock->window.last_ack_received - sock->window.last_send_base);
-        sock->temp_data_size = sock->temp_data_size - have_sent_size;
-        if (sock->temp_data_size == 0)
+        sock->tmp_len = sock->tmp_len - have_sent_size;
+        if (sock->tmp_len == 0)
           sock->edit_time_flag = TRUE;
-        char * new_data = malloc(sock->temp_data_size);
-        memcpy(new_data,sock->temp_data + have_sent_size,sock->temp_data_size);
-        free(sock->temp_data);
-        sock->temp_data = new_data;
+        char * new_data = malloc(sock->tmp_len);
+        memcpy(new_data,sock->tmp_buf + have_sent_size,sock->tmp_len);
+        free(sock->tmp_buf);
+        sock->tmp_buf = new_data;
     }
-    free(sock->temp_data);
+    free(sock->tmp_buf);
     sock->edit_time_flag = FALSE;
-    sock->temp_data_size = 0;
-    sock->temp_data = NULL;
+    sock->tmp_len = 0;
+    sock->tmp_buf = NULL;
 }
 /*
  * Param: in - the socket that is used for backend processing
@@ -473,7 +473,7 @@ void* begin_backend(void * in){
     while(pthread_mutex_lock(&(dst->send_lock)) != 0);
     buf_len = dst->sending_len;
     pthread_mutex_unlock(&(dst->send_lock));
-    //printf("backend temp_data_size = %d  rwnd = %d cwnd = %d buf_len = %d recv_len = %d ,mydying = %d their_fin = %d last_ack_received = %d \n", dst->temp_data_size,get_rwnd(dst),get_cwnd(dst),buf_len,dst->recv,dst->my_fin,dst->their_fin,dst->window.last_ack_received);
+    //printf("backend tmp_len = %d  rwnd = %d cwnd = %d buf_len = %d recv_len = %d ,mydying = %d their_fin = %d last_ack_received = %d \n", dst->tmp_len,get_rwnd(dst),get_cwnd(dst),buf_len,dst->recv,dst->my_fin,dst->their_fin,dst->window.last_ack_received);
     //如果自己的buf_len 等于0 并且接到对方的fin 且发的fin 被接到了，那么停下来等待一段时间
     if(death && buf_len == 0 && dst->their_fin  && dst->my_fin){
       puts("thread wait to exit");
@@ -498,7 +498,7 @@ void* begin_backend(void * in){
     buf_len = dst->sending_len;
     pthread_mutex_unlock(&(dst->send_lock));
 
-    if (buf_len == 0 && dst->temp_data_size == 0 && dst->dying){
+    if (buf_len == 0 && dst->tmp_len == 0 && dst->dying){
         pthread_cond_signal(&(dst->close_wait_cond)); 
     }
         

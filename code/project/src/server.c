@@ -14,9 +14,26 @@
     struct timeval time2;
 void functionality(cmu_socket_t  * sock){
     char buf[9898];
-    FILE *file_for_write;
-    // FILE *file_for_read;
+    FILE *fp;
     int n;
+
+    printf("[DEBUG] server start reading data from socket.\n");
+    n = cmu_read(sock, buf, 200, NO_FLAG);
+    printf("R: %s\n", buf);
+    printf("N: %d\n", n);
+    cmu_write(sock, "hi there", 9);
+    cmu_read(sock, buf, 200, NO_FLAG);
+    cmu_write(sock, "hi there", 9);
+
+    sleep(5);
+    n = cmu_read(sock, buf, 9898, NO_FLAG);
+    printf("N: %d\n", n);
+    fp = fopen("./test/file.c", "w+");
+    fwrite(buf, 1, n, fp);
+    // char buf[9898];
+    // FILE *file_for_write;
+    // // FILE *file_for_read;
+    // int n;
  
     // int read = 1;
     // int total = 0;
@@ -37,22 +54,22 @@ void functionality(cmu_socket_t  * sock){
     // close(file_for_read);
     // total = 0;
 
-    gettimeofday(&time1,NULL);
-    long len2;
-    long total = 0;
-    n = 1;
-    cmu_read(sock,(char*) &len2,8,NO_FLAG);
-    printf("len = %d\n", (int)len2);
-    file_for_write = fopen("./test/f1.txt", "w+");
-    while(total  < len2 && n != 0){
-        n = cmu_read(sock, buf, 2000, NO_FLAG);
-        total = total + n;
-        //printf("n = %d,total = %d\n", n,total);
-        fwrite(buf, 1, n, file_for_write);
-    }
-    gettimeofday(&time2,NULL);
+    // gettimeofday(&time1,NULL);
+    // long len2;
+    // long total = 0;
+    // n = 1;
+    // cmu_read(sock,(char*) &len2,8,NO_FLAG);
+    // printf("len = %d\n", (int)len2);
+    // file_for_write = fopen("./test/f1.txt", "w+");
+    // while(total  < len2 && n != 0){
+    //     n = cmu_read(sock, buf, 2000, NO_FLAG);
+    //     total = total + n;
+    //     printf("n = %d,total = %d\n", n, (int)total);
+    //     fwrite(buf, 1, n, file_for_write);
+    // }
+    // gettimeofday(&time2,NULL);
 
-    printf("get total = %d time = %d \n", (int)total,(int)(time1.tv_sec-time2.tv_sec + (time1.tv_usec-time2.tv_usec)/1000000));
+    // printf("get total = %d time = %d \n", (int)total,(int)(time1.tv_sec-time2.tv_sec + (time1.tv_usec-time2.tv_usec)/1000000));
     // close(file_for_write); 
 }
 
@@ -86,7 +103,7 @@ int main(int argc, char **argv) {
 
     if(cmu_socket(&socket, TCP_LISTENER, portno, serverip) < 0)
         exit(EXIT_FAILURE);
-    printf("[DEBUG] tcp socket handshakes done");
+    printf("[DEBUG] tcp socket handshakes done\n");
 
     functionality(&socket); 
     if(cmu_close(&socket) < 0)

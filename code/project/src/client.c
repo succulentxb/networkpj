@@ -9,26 +9,60 @@
  */
 void functionality(cmu_socket_t  * sock){
     char buf[9898];
-    // FILE *file_for_write;
-    FILE *file_for_read;
-    // int n;
-    // n = 1;
-    int read = 1;
-    int total = 0;
-    file_for_read = fopen("./test/random.input","rb");
-    puts("123");
-    fseek(file_for_read,0,SEEK_END);
-    long len = ftell(file_for_read);
-    fseek(file_for_read,0,SEEK_SET);
-    cmu_write(sock,(char*) &len,8);
+    int read;
+    FILE *fp;
+
+    printf("[DEBUG] client start writing data to socket.\n");
+    printf("[DEBUG] write \"hi there\"\n");
+    cmu_write(sock, "hi there", 9);
+    printf("[DEBUG] write \"hi there2\"\n");
+    cmu_write(sock, "hi there2", 10);
+    printf("[DEBUG] write \"hi there3\"\n");
+    cmu_write(sock, "hi there3", 10);
+    printf("[DEBUG] write \"hi there4\"\n");
+    cmu_write(sock, "hi there4", 10);
+    printf("[DEBUG] write \"hi there5\"\n");
+    cmu_write(sock, "hi there5", 10);
+    printf("[DEBUG] write \"hi there6\"\n");
+    cmu_write(sock, "hi there6", 10);
+    cmu_read(sock, buf, 200, NO_FLAG);
+
+    printf("[DEBUG] write \"hi there\"\n");
+    cmu_write(sock, "hi there", 9);
+    cmu_read(sock, buf, 200, NO_FLAG);
+    printf("R: %s\n", buf);
+
+    read = cmu_read(sock, buf, 200, NO_WAIT);
+    printf("Read: %d\n", read);
+
+    fp = fopen("./src/cmu_tcp.c", "rb");
+    read = 1;
     while(read > 0 ){
-        read = fread(buf, 1, 2000, file_for_read);
-        total = total + read;
-        printf("read from file  is %d total = %d len = %d\n", read, total, (int)len);
+        read = fread(buf, 1, 2000, fp);
         if(read > 0)
             cmu_write(sock, buf, read);
     }
-    printf("read total = %d\n", total);
+    // char buf[9898];
+    // // FILE *file_for_write;
+    // FILE *file_for_read;
+    // // int n;
+    // // n = 1;
+    // int read = 1;
+    // int total = 0;
+    // file_for_read = fopen("./test/random.input","rb");
+    // puts("123");
+    // fseek(file_for_read,0,SEEK_END);
+    // long len = ftell(file_for_read);
+    // fseek(file_for_read,0,SEEK_SET);
+    // cmu_write(sock,(char*) &len,8);
+    // while(read > 0 ){
+    //     read = fread(buf, 1, 2000, file_for_read);
+    //     total = total + read;
+    //     printf("read from file  is %d total = %d len = %d\n", read, total, (int)len);
+    //     if(read > 0)
+    //         cmu_write(sock, buf, read);
+    // }
+    // printf("read total = %d\n", total);
     // close((int)file_for_read);
     // total = 0;
     // int len2;
@@ -74,7 +108,7 @@ int main(int argc, char **argv) {
 
     if(cmu_socket(&socket, TCP_INITATOR, portno, serverip) < 0)
         exit(EXIT_FAILURE);
-    printf("[DEBUG] tcp socket handshakes done");
+    printf("[DEBUG] tcp socket handshakes done\n");
     
     functionality(&socket);
 
