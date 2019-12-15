@@ -1,6 +1,3 @@
-
-#include <time.h>
-#include <stdio.h>
 #include "cmu_tcp.h"
 
 /*
@@ -14,20 +11,31 @@ void functionality(cmu_socket_t  * sock){
     char buf[9898];
     FILE *fp;
     int n;
+    char *msg;
 
-    printf("[DEBUG] server start reading data from socket.\n");
-    n = cmu_read(sock, buf, 200, NO_FLAG);
-    printf("R: %s\n", buf);
-    printf("N: %d\n", n);
-    cmu_write(sock, "hi there", 9);
-    cmu_read(sock, buf, 200, NO_FLAG);
-    cmu_write(sock, "hi there", 9);
+    // n = cmu_read(sock, buf, 200, NO_FLAG);
+    // printf("R: %s\n", buf);
+    // printf("N: %d\n", n);
+    // msg = "server: hi there 1";
+    // cmu_write(sock, msg, strlen(msg));
 
-    sleep(5);
-    n = cmu_read(sock, buf, 9898, NO_FLAG);
-    printf("N: %d\n", n);
-    fp = fopen("./test/file.c", "w+");
-    fwrite(buf, 1, n, fp);
+    // sleep(1);
+    // cmu_read(sock, buf, 200, NO_FLAG);
+    // msg = "server: hi there 2";
+    // cmu_write(sock, msg, strlen(msg));
+
+    // sleep(5);
+    // fp = fopen("./test/file.pdf", "w+");
+    // while(n = cmu_read(sock, buf, 9898, NO_FLAG)){
+    //     printf("N: %d\n", n);
+    //     fwrite(buf, 1, n, fp);
+    //     fflush(fp);
+    // }
+    // fclose(fp);
+    while (n = cmu_read(sock, buf, 9898, WAIT_READ)) {
+        printf("[DEBUG] recv %d\n", n);
+    }
+    printf("[DEBUG] exit recieve\n");
 }
 
 
@@ -44,27 +52,31 @@ int main(int argc, char **argv) {
     char *serverport;
     cmu_socket_t socket;
     
-    serverip = getenv("server15441");
+    /* 默认服务器网址 */
+    serverip = getenv("server15441"); /* getenv：从linux环境变量中读取变量值 */
     if (serverip) ;
     else {
+        /* 为什么是10.0.0.1？ */
         serverip = "10.0.0.1";
     }
 
+    /* 默认服务器监听端口 */
     serverport = getenv("serverport15441");
     if (serverport) ;
     else {
         serverport = "15441";
     }
+    /* 字符串转为整数  */
     portno = (unsigned short)atoi(serverport);
 
 
+    /* 判断端口是否被占用 */
     if(cmu_socket(&socket, TCP_LISTENER, portno, serverip) < 0)
         exit(EXIT_FAILURE);
-    printf("[DEBUG] tcp socket handshakes done\n");
 
-    functionality(&socket); 
+    functionality(&socket);
+
     if(cmu_close(&socket) < 0)
         exit(EXIT_FAILURE);
-
     return EXIT_SUCCESS;
 }

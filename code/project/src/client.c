@@ -8,36 +8,60 @@
  *
  */
 void functionality(cmu_socket_t  * sock){
+    // char buf[9898];
+    // int read;
+    // FILE *fp;
+    // char *msg;
+
+    // msg = "client: hi there 1";
+    // cmu_write(sock, msg, strlen(msg));
+    // sleep(1);
+    // msg = "client: hi there 2";
+    // cmu_write(sock, msg, strlen(msg));
+    // msg = "client: hi there 3";
+    // cmu_write(sock, msg, strlen(msg));
+    // msg = "client: hi there 4";
+    // cmu_write(sock, msg, strlen(msg));
+    // msg = "client: hi there 5";
+    // cmu_write(sock, msg, strlen(msg));
+    // msg = "client: hi there 6";
+    // cmu_write(sock, msg, strlen(msg));
+    // cmu_read(sock, buf, 200, NO_FLAG);
+
+    // msg = "client: hi there 7";
+    // cmu_write(sock, msg, strlen(msg));
+    // cmu_write(sock, "hi there", 9);
+    // cmu_read(sock, buf, 200, NO_FLAG);
+    // printf("R: %s\n", buf);
+
+    // read = cmu_read(sock, buf, 200, NO_WAIT);
+    // printf("Read: %d\n", read);
+
+    // fp = fopen("./data/file.pdf", "rb");
+    // read = 1;
+    // while(read > 0 ){
+    //     read = fread(buf, 1, 2000, fp);
+    //     if(read > 0)
+    //         cmu_write(sock, buf, read);
+    // }
+    // fclose(fp);
     char buf[9898];
-    int read;
     FILE *fp;
+    int n;
+    int read;
 
-    printf("[DEBUG] client start writing data to socket.\n");
-    printf("[DEBUG] write \"hi there\"\n");
-    cmu_write(sock, "hi there", 9);
-    printf("[DEBUG] write \"hi there2\"\n");
-    cmu_write(sock, "hi there2", 10);
-    printf("[DEBUG] write \"hi there3\"\n");
-    cmu_write(sock, "hi there3", 10);
-    printf("[DEBUG] write \"hi there4\"\n");
-    cmu_write(sock, "hi there4", 10);
-    printf("[DEBUG] write \"hi there5\"\n");
-    cmu_write(sock, "hi there5", 10);
-    printf("[DEBUG] write \"hi there6\"\n");
-    cmu_write(sock, "hi there6", 10);
-    cmu_read(sock, buf, 200, NO_FLAG);
+    // Wait to hear from an initiator
+    // n = 0;
+    // while (n == 0) {
+    //     n = cmu_read(sock, buf, 9898, NO_FLAG);
+    // }
 
-    printf("[DEBUG] write \"hi there\"\n");
-    cmu_write(sock, "hi there", 9);
-    cmu_read(sock, buf, 200, NO_FLAG);
-    printf("R: %s\n", buf);
-
-    read = cmu_read(sock, buf, 200, NO_WAIT);
-    printf("Read: %d\n", read);
-
-    fp = fopen("./src/cmu_tcp.c", "rb");
+    // Send over a random file
+    printf("[DEBUG] [client] start reading random.input\n");
+    fp = fopen("./test/random.input", "rb");
     read = 1;
     while(read > 0 ){
+        // printf("[")
         read = fread(buf, 1, 2000, fp);
         if(read > 0)
             cmu_write(sock, buf, read);
@@ -74,7 +98,6 @@ int main(int argc, char **argv) {
 
     if(cmu_socket(&socket, TCP_INITATOR, portno, serverip) < 0)
         exit(EXIT_FAILURE);
-    printf("[DEBUG] tcp socket handshakes done\n");
     
     functionality(&socket);
 

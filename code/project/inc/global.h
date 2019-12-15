@@ -16,6 +16,7 @@
 #define NO_FLAG 0
 #define NO_WAIT 1
 #define TIMEOUT 2
+#define WAIT_READ 3
 
 #define TRUE 1
 #define FALSE 0

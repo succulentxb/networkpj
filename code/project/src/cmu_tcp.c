@@ -44,7 +44,7 @@ void fdu_hand_wave(cmu_socket_t *sock) {
     pthread_mutex_unlock(&(sock->send_lock));
     //唤醒后可以向对方发送
     sock->tcp_state = FIN_SENT;
-    send_packet_with_seq_ack_flags(sock, sock->window.last_ack_received + 1, 0, FIN_FLAG_MASK);
+    send_packet_with_seq_ack_flags(sock, sock->window.last_ack_received, 0, FIN_FLAG_MASK);
 }
 
 
@@ -212,6 +212,9 @@ int cmu_close(cmu_socket_t * sock) {
 int cmu_read(cmu_socket_t * sock, char* dst, int length, int flags) {
   char* new_buf;
   int read_len = 0;
+  struct timeval time_out;
+  time_out.tv_sec = 3;
+  time_out.tv_usec = 0;
 
   if(length < 0) {
     perror("[ERROR] negative length");
@@ -228,7 +231,12 @@ int cmu_read(cmu_socket_t * sock, char* dst, int length, int flags) {
         pthread_cond_wait(&(sock->wait_cond), &(sock->recv_lock)); 
         printf("[DEBUG] [cmu_read] get signal and lock, recieve_len=%d\n", sock->received_len);
       }
-      printf("[DEBUG] [cmu_read] start read from socket fd, enter NO_WAIT\n");
+    case WAIT_READ:
+      if (sock->received_len == 0) {
+        printf("[DEBUG] [cmu_read] recieve_len=0, release lock, waiting for signal with timeout\n");
+        int r = pthread_cond_timedwait(&(sock->wait_cond), &(sock->recv_lock), &time_out); 
+        printf("[DEBUG] [cmu_read] get signal and lock, recieve_len=%d, r=%d\n", sock->received_len, r);
+      }
     case NO_WAIT:
       if (sock->received_len > 0) {
         if (sock->received_len > length)
