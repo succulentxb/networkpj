@@ -132,7 +132,7 @@ int cmu_socket(cmu_socket_t* dst, int flag, int port, char* serverIP) {
  * Purpose: Do handshake with server.
 */
 int client_handshake(cmu_socket_t * sock) {
-  flag_pkt_rdt_send(sock, 0, 0, SYN_FLAG_MASK);
+  flag_pkt_rdt_send(sock, sock->window.last_ack_received, sock->window.expected_rev_seq, SYN_FLAG_MASK);
   return 0;
 }
 
@@ -146,7 +146,8 @@ int server_handshake(cmu_socket_t * sock) {
   while(sock->their_syn == FALSE) {
     check_for_data(sock, TIMEOUT);
   }
-  flag_pkt_rdt_send(sock, 0, 1, SYN_FLAG_MASK | ACK_FLAG_MASK);
+  printf("[DEBUG] [server_handshake] to send flag pkt, seq=%d, ack=%d\n", sock->window.last_ack_received, sock->window.expected_rev_seq);
+  flag_pkt_rdt_send(sock, sock->window.last_ack_received, sock->window.expected_rev_seq, SYN_FLAG_MASK | ACK_FLAG_MASK);
   return 0;
 }
 

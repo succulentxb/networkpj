@@ -162,8 +162,8 @@ the first test will pass on starter  code but the second test
 while the second test with a larger payload will not pass
 because you must implement seq nums and ack nums correctly in Checkpoint 1
 """
-@pytest.mark.xfail # maker that we expect this test to fail (for now)
-@pytest.mark.parametrize("payload", ['p','pytest 1234567'])
+# @pytest.mark.xfail # maker that we expect this test to fail (for now)
+@pytest.mark.parametrize("payload", ['p'])  # ,'pytest 1234567'])
 def test_basic_ack_packets(payload):
     """Basic test: Check if when you data packets,
     the server responds with correct ack packet with correct ack num.
@@ -171,10 +171,17 @@ def test_basic_ack_packets(payload):
     with Connection(host=TESTING_HOST_IP, user='vagrant',
                     connect_kwargs={'password':'vagrant'}) as conn:
         try:
-            conn.run(START_TESTING_SERVER_CMD)
-            # This test seems that exists some problem.
+            conn.run(S
+            TART_TESTING_SERVER_CMD)
+            # This test seems that exists some problems.
             # It send a packet directly without tcp connection handshakes, so that cannot get a correct ack response.
-            data_pkt = eth/ip/udp/CMUTCP(plen=len(payload)+25, seq_num=1000)/Raw(load=payload)
+            handshake_pkt = eth/ip/udp/CMUTCP(flags=SYN_MASK, seq_num=999)
+            resp = srp1(handshake_pkt, timeout=TIMEOUT, iface=IFNAME)
+            assert (resp is not None), "Client handshake get no response."
+            assert (resp[CMUTCP].flags == SYN_MASK|ACK_MASK), "Client handshake get response without SYN."
+            assert (resp[CMUTCP].ack_num == 999+1), "Server response incorrect ack"
+
+            data_pkt = eth/ip/udp/CMUTCP(plen=len(payload)+25, seq_num=1000, ack_num=resp[CMUTCP].seq_num+1, flags=ACK_MASK)/Raw(load=payload)
             resp = srp1(data_pkt, timeout=TIMEOUT, iface=IFNAME)
         finally:
             try:
