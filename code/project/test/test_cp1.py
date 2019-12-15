@@ -173,8 +173,9 @@ def test_basic_ack_packets(payload):
         try:
             conn.run(S
             TART_TESTING_SERVER_CMD)
-            # This test seems that exists some problems.
+            # The origin test seems that exists some problems.
             # It send a packet directly without tcp connection handshakes, so that cannot get a correct ack response.
+            # To solve above problem, add a handshake packet here, and origin test behavior is not modifed.
             handshake_pkt = eth/ip/udp/CMUTCP(flags=SYN_MASK, seq_num=999)
             resp = srp1(handshake_pkt, timeout=TIMEOUT, iface=IFNAME)
             assert (resp is not None), "Client handshake get no response."
