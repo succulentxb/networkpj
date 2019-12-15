@@ -171,8 +171,7 @@ def test_basic_ack_packets(payload):
     with Connection(host=TESTING_HOST_IP, user='vagrant',
                     connect_kwargs={'password':'vagrant'}) as conn:
         try:
-            conn.run(S
-            TART_TESTING_SERVER_CMD)
+            conn.run(START_TESTING_SERVER_CMD)
             # The origin test seems that exists some problems.
             # It send a packet directly without tcp connection handshakes, so that cannot get a correct ack response.
             # To solve above problem, add a handshake packet here, and origin test behavior is not modifed.
