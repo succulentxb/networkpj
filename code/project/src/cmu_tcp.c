@@ -1,8 +1,52 @@
 #include "cmu_tcp.h"
 
-int client_handshake(cmu_socket_t * sock);
-int server_handshake(cmu_socket_t * sock);
-int wave_hand(cmu_socket_t * sock);
+int fdu_hand_shake(cmu_socket_t *sock, int flag);
+
+void fdu_hand_wave(cmu_socket_t *sock);
+
+/**
+ * Param: sock - The socket to shake hand
+ * Param: flag - Specify the socket type, client(TCP_INITATOR) or server(TCP_LISTENER)
+ * 
+ * Purpose: To complete handshakes before tcp connection established.
+ *  Param flag can be TCP_INITATOR or TCP_LISTENER.
+*/
+int fdu_hand_shake(cmu_socket_t *sock, int flag) {
+  if (flag == TCP_INITATOR) {
+    printf("[DEBUG] [fdu_hand_shake] client send syn\n");
+    send_packet_with_seq_ack_flags(sock, sock->window.last_ack_received, sock->window.expected_rev_seq, SYN_FLAG_MASK);
+  } else if (flag == TCP_LISTENER) {
+    while (sock->tcp_state != SYN_RCVD) {
+      check_for_data(sock, TIMEOUT);
+    }
+    printf("[DEBUG] [fdu_hand_shake] server send syn and ack\n");
+    sock->window.last_ack_received += 1;
+    send_packet_with_seq_ack_flags(sock, sock->window.last_ack_received, sock->window.expected_rev_seq, SYN_FLAG_MASK | ACK_FLAG_MASK);
+  } else {
+    fprintf(stderr, "unk flag");
+  }
+  return 0;
+}
+
+/**
+ * Param: socket - To socket to wave hand to close
+ * 
+ * Purpose: To wave hand in tcp before tcp connection close.
+ * 
+*/
+void fdu_hand_wave(cmu_socket_t *sock) {
+
+    while (pthread_mutex_lock(&(sock->send_lock)) != 0);
+    //如果缓冲区还有数据 解除写锁 线程休眠
+    while (sock->sending_len != 0)
+        pthread_cond_wait(&(sock->terminate_cond), &(sock->send_lock));
+
+    pthread_mutex_unlock(&(sock->send_lock));
+    //唤醒后可以向对方发送
+    sock->tcp_state = FIN_SENT;
+    send_packet_with_seq_ack_flags(sock, sock->window.last_ack_received + 1, 0, FIN_FLAG_MASK);
+}
+
 
 /*
  * Param: dst - The structure where socket information will be stored
@@ -55,8 +99,6 @@ int cmu_socket(cmu_socket_t* dst, int flag, int port, char* serverIP) {
   dst->timeout_interval.tv_sec = 3;
   dst->timeout_interval.tv_usec = 0;
 
-  dst->their_fin = FALSE;
-  dst->their_syn = FALSE;
   dst->tmp_buf = NULL;
   dst->tmp_len = 0;
 
@@ -112,44 +154,14 @@ int cmu_socket(cmu_socket_t* dst, int flag, int port, char* serverIP) {
 
   getsockname(sockfd, (struct sockaddr*) &my_addr, &len);
   dst->my_port = ntohs(my_addr.sin_port);
-  
-  if (flag == TCP_INITATOR &&  client_handshake(dst) < 0 ) {
-    perror("[ERROR] handshake failed");
-    return EXIT_ERROR;
-  }
-  if (flag == TCP_LISTENER &&  server_handshake(dst) < 0 ) {
-    perror("[ERROR] handshake failed");
-    return EXIT_ERROR;
-  }
+
+  dst->tcp_state = CLOSED;
+  fdu_hand_shake(dst, flag);
 
   pthread_create(&(dst->thread_id), NULL, begin_backend, (void *)dst);  
   return EXIT_SUCCESS;
 }
 
-/**
- * Param: sock - client socket to do handshake
- * 
- * Purpose: Do handshake with server.
-*/
-int client_handshake(cmu_socket_t * sock) {
-  flag_pkt_rdt_send(sock, sock->window.last_ack_received, sock->window.expected_rev_seq, SYN_FLAG_MASK);
-  return 0;
-}
-
-/**
- * Param: sock - server socket to do handshake
- * 
- * Purpose: Wating for tcp client socket handshake packet.
- *  Response ack when recieve the handshake request.
-*/
-int server_handshake(cmu_socket_t * sock) {
-  while(sock->their_syn == FALSE) {
-    check_for_data(sock, TIMEOUT);
-  }
-  printf("[DEBUG] [server_handshake] to send flag pkt, seq=%d, ack=%d\n", sock->window.last_ack_received, sock->window.expected_rev_seq);
-  flag_pkt_rdt_send(sock, sock->window.last_ack_received, sock->window.expected_rev_seq, SYN_FLAG_MASK | ACK_FLAG_MASK);
-  return 0;
-}
 
 /*
  * Param: sock - The socket to close.
@@ -166,7 +178,7 @@ int cmu_close(cmu_socket_t * sock) {
 
   pthread_mutex_unlock(&(sock->death_lock));
 
-  wave_hand(sock);
+  fdu_hand_wave(sock);
   pthread_join(sock->thread_id, NULL); 
 
   if(sock != NULL) {
@@ -182,25 +194,7 @@ int cmu_close(cmu_socket_t * sock) {
   return close(sock->socket);
 }
 
-/**
- * Param: sock - The socket to wave hand to close.
- * 
- * Purpose: Wave hand to close tcp socket.
- *  It will send all remain data before send FIN packet.
-*/
-int wave_hand(cmu_socket_t * sock) {
-  while(pthread_mutex_lock(&(sock->send_lock)) != 0);
 
-  // send remain data
-  while(sock->sending_len != 0 || sock->tmp_len != 0)
-      pthread_cond_wait(&(sock->close_wait_cond), &(sock->send_lock));
-  flag_pkt_rdt_send(sock, sock->window.last_ack_received+1, 0, FIN_FLAG_MASK);
-
-  pthread_mutex_unlock(&(sock->send_lock));
-
-  sock->my_fin = TRUE;
-  return 0;
-}
 
 /*
  * Param: sock - The socket to read data from the received buffer.
@@ -229,7 +223,7 @@ int cmu_read(cmu_socket_t * sock, char* dst, int length, int flags) {
 
   switch (flags) {
     case NO_FLAG:
-      while (sock->received_len == 0 && !sock->their_fin) {
+      while (sock->received_len == 0) {
         printf("[DEBUG] [cmu_read] recieve_len=0, release lock, waiting for signal\n");
         pthread_cond_wait(&(sock->wait_cond), &(sock->recv_lock)); 
         printf("[DEBUG] [cmu_read] get signal and lock, recieve_len=%d\n", sock->received_len);

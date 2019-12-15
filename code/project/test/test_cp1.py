@@ -163,7 +163,7 @@ while the second test with a larger payload will not pass
 because you must implement seq nums and ack nums correctly in Checkpoint 1
 """
 # @pytest.mark.xfail # maker that we expect this test to fail (for now)
-@pytest.mark.parametrize("payload", ['p'])  # ,'pytest 1234567'])
+@pytest.mark.parametrize("payload", ['p','pytest 1234567'])
 def test_basic_ack_packets(payload):
     """Basic test: Check if when you data packets,
     the server responds with correct ack packet with correct ack num.
